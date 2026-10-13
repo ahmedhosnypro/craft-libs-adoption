@@ -6,3 +6,15 @@ runs/
 # Local tracking databases never ship.
 progress.db
 *.db
+
+# Scratch clone of the target fork and run scratch files.
+craft-libs-target/
+prs.json
+rows.jsonl
+photo-files.jsonl
+photo-buckets.txt
+vc-files.jsonl
+ev-files.jsonl
+evidence.jsonl
+window.txt
+notes.txt
