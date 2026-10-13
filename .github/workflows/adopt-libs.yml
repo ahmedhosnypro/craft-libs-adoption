@@ -1,0 +1,210 @@
+name: Craft libs adoption scan
+
+on:
+  schedule:
+    # Four 6h windows; the 00:20 slot lands right after the suite's
+    # 22:00-00:00 UTC merge burst so the first scan sees the day's work.
+    - cron: "20 0,6,12,18 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: adopt-libs
+  cancel-in-progress: false
+
+env:
+  RELEASE_REPO: ahmedhosnypro/craft-agent
+  CRAFT_AGENT_VERSION: v1
+  TARGET_REPO: ahmedhosnypro/craft-libs
+  MODEL_GATEWAY_REPO: ahmedhosnypro/ironrouter-backend
+  MODEL_GATEWAY_DUMP: ironrouter-registry.dump
+  MODEL_GATEWAY_BIN: target/release/app
+  MODEL_GATEWAY_PORT: "17844"
+  EXPECTED_MODEL: glm-5.3-flash
+  CRAFT_AGENT_EGRESS_ALLOWLIST: github.com,api.github.com,codeload.github.com,objects.githubusercontent.com
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Fetch the model gateway (token never in a URL, config, or log line)
+        env:
+          PRIVATE_REPO_ACCESS_TOKEN: ${{ secrets.PRIVATE_REPO_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+          umask 077
+          auth="Authorization: Basic $(printf 'x-access-token:%s' "$PRIVATE_REPO_ACCESS_TOKEN" | base64)"
+          git -c "http.https://github.com/.extraheader=${auth}" \
+            clone --depth 1 "https://github.com/${MODEL_GATEWAY_REPO}.git" \
+            "${RUNNER_TEMP}/gateway"
+
+      - name: Start the gateway database
+        env:
+          GATEWAY_DB_PASSWORD: ${{ secrets.GATEWAY_DB_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+          docker run -d --name model_gateway_postgres --network host \
+            -e POSTGRES_USER=ironrouter \
+            -e POSTGRES_PASSWORD="$GATEWAY_DB_PASSWORD" \
+            -e POSTGRES_DB=ironrouter_live \
+            -v model_gateway_pgdata:/var/lib/postgresql/data \
+            postgres:17 -p 5434
+          ready=0
+          for _ in $(seq 1 30); do
+            if docker exec model_gateway_postgres pg_isready -p 5434 -U ironrouter >/dev/null 2>&1; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ready" -ne 1 ]; then
+            echo "::error::postgres never became ready on :5434"
+            exit 1
+          fi
+
+      - name: Restore the model registry
+        run: |
+          set -euo pipefail
+          docker exec -i model_gateway_postgres pg_restore -p 5434 -U ironrouter \
+            -d ironrouter_live --clean --if-exists \
+            < "${RUNNER_TEMP}/gateway/${MODEL_GATEWAY_DUMP}"
+
+      - name: Start the model gateway
+        env:
+          IR_MASTER_KEY: ${{ secrets.IR_MASTER_KEY }}
+          GATEWAY_DB_PASSWORD: ${{ secrets.GATEWAY_DB_PASSWORD }}
+        working-directory: ${{ runner.temp }}/gateway
+        run: |
+          set -euo pipefail
+          umask 077
+          export DATABASE_URL="postgres://ironrouter:${GATEWAY_DB_PASSWORD}@127.0.0.1:5434/ironrouter_live"
+          export HOST=127.0.0.1
+          export PORT="${MODEL_GATEWAY_PORT}"
+          export BACKEND_URL="http://localhost:${MODEL_GATEWAY_PORT}"
+          export RUST_ENV=development
+          export COOKIE_SECURE=false
+          export RUST_LOG=info
+          export IR_MASTER_KEY
+          nohup "./${MODEL_GATEWAY_BIN}" > "${RUNNER_TEMP}/gateway.log" 2>&1 &
+
+      - name: Wait for the gateway (healthz, then authed model listing)
+        env:
+          MODEL_API_KEY: ${{ secrets.MODEL_API_KEY }}
+        run: |
+          set -euo pipefail
+          live=0
+          for _ in $(seq 1 36); do
+            if curl -fsS --max-time 2 "http://localhost:${MODEL_GATEWAY_PORT}/healthz" >/dev/null 2>&1; then
+              live=1
+              break
+            fi
+            sleep 5
+          done
+          if [ "$live" -ne 1 ]; then
+            echo "::error::gateway /healthz never answered on :${MODEL_GATEWAY_PORT}"
+            tail -n 20 "${RUNNER_TEMP}/gateway.log" || true
+            exit 1
+          fi
+          ready=0
+          for _ in $(seq 1 12); do
+            if curl -fsS -H "Authorization: Bearer ${MODEL_API_KEY}" \
+              "http://localhost:${MODEL_GATEWAY_PORT}/v1/models" 2>/dev/null \
+              | grep -q "${EXPECTED_MODEL}"; then
+              ready=1
+              break
+            fi
+            sleep 5
+          done
+          if [ "$ready" -ne 1 ]; then
+            echo "::error::/v1/models never listed ${EXPECTED_MODEL} (API key or master key mismatch)"
+            exit 1
+          fi
+
+      - name: Install craft-agent
+        env:
+          PRIVATE_REPO_ACCESS_TOKEN: ${{ secrets.PRIVATE_REPO_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+          umask 077
+          bin_dir="${RUNNER_TEMP}/craft-bin"
+          mkdir -p "$bin_dir"
+          export GH_TOKEN="$PRIVATE_REPO_ACCESS_TOKEN"
+          release_json="$(gh api "repos/${RELEASE_REPO}/releases/tags/${CRAFT_AGENT_VERSION}")"
+          for name in checksums.txt craft-agent-x86_64-unknown-linux-musl \
+                      craft-helpers-x86_64-unknown-linux-musl; do
+            asset_id="$(printf '%s' "$release_json" | jq -r --arg n "$name" \
+              '.assets[] | select(.name == $n) | .id')"
+            if [ -z "$asset_id" ] || [ "$asset_id" = "null" ]; then
+              echo "::error::release ${CRAFT_AGENT_VERSION} carries no asset named ${name}"
+              exit 1
+            fi
+            curl -fsSL -H "Authorization: Bearer ${PRIVATE_REPO_ACCESS_TOKEN}" \
+              -H "Accept: application/octet-stream" -o "${bin_dir}/${name}" \
+              "https://api.github.com/repos/${RELEASE_REPO}/releases/assets/${asset_id}" \
+              || gh release download "${CRAFT_AGENT_VERSION}" -R "${RELEASE_REPO}" \
+                --pattern "${name}" --dir "${bin_dir}" --clobber
+          done
+          (
+            cd "$bin_dir"
+            sha256sum --check checksums.txt --ignore-missing
+          )
+          sudo install -m 0755 "${bin_dir}/craft-agent-x86_64-unknown-linux-musl" /usr/local/bin/craft-agent
+          sudo install -m 0755 "${bin_dir}/craft-helpers-x86_64-unknown-linux-musl" /usr/local/bin/craft-helpers
+
+      - name: Run the adoption scan
+        id: agent
+        env:
+          MODEL_API_URL: ${{ secrets.MODEL_API_URL }}
+          MODEL_API_KEY: ${{ secrets.MODEL_API_KEY }}
+          MODEL_ID: ${{ secrets.MODEL_ID }}
+          # The builtin token cannot write another repository; the run needs
+          # push + pull-request rights on the target fork, so it rides the
+          # private-access PAT. The write gate pins it to the target repo.
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config --global user.name "craft-agent"
+          git config --global user.email "agent@craft-libs-adoption.invalid"
+          export CRAFT_AGENT_PROVIDER=openai
+          export CRAFT_AGENT_MODEL="${MODEL_ID}"
+          export OPENAI_BASE_URL="${MODEL_API_URL}"
+          export OPENAI_API_KEY="${MODEL_API_KEY}"
+          export CRAFT_AGENT_WRITE_REPO="${TARGET_REPO}"
+          transcript="${RUNNER_TEMP}/run-transcript.jsonl"
+          set +e
+          craft-agent run --agent lib-adoption-analyst --prompt missions/adopt-libs.md \
+            --max-turns 250 --max-tokens 8000000 --output-format stream-json \
+            > "$transcript"
+          rc=$?
+          set -e
+          case "$rc" in
+            0) conclusion="success" ;;
+            2) conclusion="max-turns" ;;
+            3) conclusion="budget" ;;
+            4) conclusion="denied" ;;
+            *) conclusion="error" ;;
+          esac
+          echo "conclusion=${conclusion}" >> "$GITHUB_OUTPUT"
+          echo "exit-code=${rc}" >> "$GITHUB_OUTPUT"
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::craft-agent exited ${rc} (${conclusion})"
+            tail -n 5 "$transcript" || true
+          fi
+          exit "$rc"
+
+      - name: Upload the run transcript
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: run-transcript
+          path: ${{ runner.temp }}/run-transcript.jsonl
+          if-no-files-found: warn
