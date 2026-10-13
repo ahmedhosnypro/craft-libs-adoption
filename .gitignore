@@ -2,3 +2,7 @@
 /scratch/
 runs/
 .env
+
+# Local tracking databases never ship.
+progress.db
+*.db
