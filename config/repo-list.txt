@@ -20,5 +20,7 @@ storytold/cadcraft      consumer    crates/ui-egui,crates/engine,crates/geom,cra
 storytold/wordcraft     consumer    crates/ui-egui,crates/fonts,crates/geom,crates/mcp,crates/render        ui-egui fonts geom mcp formats doc render
 storytold/soundcraft     consumer    crates/ui-egui,crates/engine,crates/automation                         ui-egui engine automation
 storytold/artcraft       candidate   crates/lib,crates/api_clients,crates/testing                            midjourney_client fal_client cookie_store cloudflare_errors cloudflare_mitigation browser_emulation filesys images mimetypes jwt_light http_headers url_utils uuid_utils test_utils
+storytold/artcraft-services candidate crates/,apps/                                              api_clients cookie_store cloudflare browser_emulation
+storytold/craft-repo-status-app candidate crates/,src/                                             status-poller
 storytold/craft-launcher candidate   crates/ui-egui,crates/core,crates/native                            ui-egui i18n updater
 storytold/craft-fonts    source      crates/craft-fonts,crates/craft-fonts-tests,manifest.txt            fonts-loader manifest-protocol
