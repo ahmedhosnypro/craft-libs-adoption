@@ -25,7 +25,7 @@ notices. You are that someone, on a six-hour cadence.
 
 - Compute the window once: `since="$(date -u -d '7 hours ago' +%Y-%m-%dT%H:%M:%SZ)"` — a 7-hour look-back on the 6-hour cadence; the overlap is idempotent (merges are keyed by number) and it heals a missed slot. Record the window honestly in the rollup ("7h look-back").
 - Primary sweep — one command, no gate traps, no output caps (the helper is a binary writing a file):
-  `craft-helpers prs --org storytold --repos <comma-separated list from repo-list> --since 7h --limit-per-repo 100 --max-prs 500 --json > "$RUNNER_TEMP/prs.json"` (check `craft-helpers prs --help` for the exact `--since` syntax; the binary is on PATH).
+  `craft-helpers prs --org storytold --repos <comma-separated list from repo-list> --since 7h --limit-per-repo 100 --max-prs 500 --json > prs.json` (check `craft-helpers prs --help` for the exact `--since` syntax; the binary is on PATH).
 - Fallback for capped repos — for any repo whose count in prs.json reaches the 100-per-repo cap or whose output carries the "more merged PRs may exist" truncated marker, page the REST pulls list with GET parameters only — never `-f` (it switches gh to a POST, and the tool gate denies POSTs to repos outside the write target):
 
   ```
@@ -103,18 +103,20 @@ Each proposal pull request on ahmedhosnypro/craft-libs:
 - Every artifact your final message names must have been created by
   THIS run. Existing branches, commits, or pull requests from
   earlier runs satisfy nothing — name them only as context.
-- Set up the target clone ONCE, with the token in an http header
-  (never in a URL, a command line, or output — the transcript
-  artifact is public):
+- Set up the target clone ONCE, inside the workspace, with the token
+  in an http header (never in a URL, a command line, or output — the
+  transcript artifact is public):
 
   ```
-  git clone --depth 1 https://github.com/ahmedhosnypro/craft-libs.git "${RUNNER_TEMP}/craft-libs"
-  git -C "${RUNNER_TEMP}/craft-libs" config http.https://github.com/.extraheader \
+  git clone --depth 1 https://github.com/ahmedhosnypro/craft-libs.git craft-libs-target
+  git -C craft-libs-target config http.https://github.com/.extraheader \
     "Authorization: Basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64)"
   ```
 
-  All branch, commit, and push work happens in that clone. `gh auth
-  setup-git` is denied by the write gate — never call it.
+  All branch, commit, and push work happens in that clone. It is a
+  scratch clone: never commit `craft-libs-target/` into this
+  repository. `gh auth setup-git` is denied by the write gate —
+  never call it.
 - Open each pull request with the explicit form (the target is a
   fork; bare `gh pr create` can resolve against the parent):
   `gh pr create --repo ahmedhosnypro/craft-libs --base main
@@ -140,6 +142,12 @@ Each proposal pull request on ahmedhosnypro/craft-libs:
 - Read storytold/* repositories only. Never push, branch, open pull
   requests, or comment there. All writes target
   ahmedhosnypro/craft-libs, and nothing else.
+- Every path this run touches lives inside the workspace root (the
+  checkout of this repository). Never write to `/tmp`, `$RUNNER_TEMP`,
+  `$HOME`, or any absolute path outside it — the gate denies those
+  writes and the run fails. `$RUNNER_TEMP` is not exported into your
+  bash environment. Use relative paths for every scratch file and for
+  the target clone.
 - Never print environment variables or secrets.
 - Cite or it did not happen: no proposal, finding, or claim without
   a linked pull request, file path, or API result.
