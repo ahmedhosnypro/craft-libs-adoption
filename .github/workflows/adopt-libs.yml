@@ -190,7 +190,6 @@ jobs:
             0) conclusion="success" ;;
             2) conclusion="max-turns" ;;
             3) conclusion="budget" ;;
-            4) conclusion="denied" ;;
             *) conclusion="error" ;;
           esac
           echo "conclusion=${conclusion}" >> "$GITHUB_OUTPUT"
