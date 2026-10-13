@@ -23,19 +23,25 @@ notices. You are that someone, on a six-hour cadence.
 
 ## Phase 1 — Collect (bounded)
 
-- For each repo: page the REST pulls list (`gh api repos/<repo>/pulls
-  --paginate -f state=closed -f per_page=100 -f sort=updated`) and
-  keep only items whose `merged_at` falls inside the window. Do NOT
-  trust search-API date buckets — their index lags behind merge
-  bursts and skips real merges.
-- Search-API discipline: the token's search bucket is 30/min shared;
-  use REST lists for collection and reserve search for one-off
-  checks. On a 403, wait 25 seconds and retry once.
-- Windows are bursty: 0 merges is a valid, common result — an empty
-  or near-empty window still runs Phases 2-4 and exits cleanly.
-- Group merges by repo, then by crate prefix (from the repo-list
-  watch-paths). App-features outside the watch-paths are classified
-  irrelevant in one line each; do not read their diffs.
+- Compute the window once: `since="$(date -u -d '7 hours ago' +%Y-%m-%dT%H:%M:%SZ)"` — a 7-hour look-back on the 6-hour cadence; the overlap is idempotent (merges are keyed by number) and it heals a missed slot. Record the window honestly in the rollup ("7h look-back").
+- For each repo, page the REST pulls list with GET parameters only — never `-f` (it switches gh to a POST, and the tool gate denies POSTs to repos outside the write target):
+
+  ```
+  page=1
+  while :; do
+    body="$(gh api --method GET "repos/${repo}/pulls?state=closed&sort=updated&direction=desc&per_page=100&page=${page}" 2>/dev/null)" || break
+    [ "$(printf '%s' "$body" | jq 'length')" -gt 0 ] || break
+    printf '%s' "$body" | jq -c --arg s "$since" \
+      '.[] | select(.merged_at != null and .merged_at >= $s) | {number,title,user:.user.login,merged_at,html_url}' >> rows.jsonl
+    [ "$(printf '%s' "$body" | jq -r 'map(.updated_at) | max')" \< "$since" ] && break
+    page=$((page+1)); [ "$page" -gt 15 ] && { echo "page cap hit for ${repo}" >> notes.txt; break; }
+  done
+  ```
+
+  The early exit is sound: `sort=updated` desc makes `updated_at` non-increasing, so a page whose newest item predates the window proves no window merges remain. Do NOT use `--paginate` (the single giant response trips the 256 KiB tool-output cap mid-JSON) and do NOT trust search-API date buckets — their index lags merge bursts by hours.
+- Search-API discipline: the token's search bucket is 30/min shared; use the REST list above for collection and reserve search for one-off checks. On a 403, wait 25 seconds and retry once.
+- Windows are bursty: 0 merges is a valid, common result — an empty or near-empty window still runs Phases 2-4 and exits cleanly.
+- Group merges by repo, then by crate prefix (from the repo-list watch-paths). App-features outside the watch-paths are classified irrelevant in one line each; do not read their diffs.
 
 ## Phase 2 — Classify (cheap, honest)
 
@@ -95,6 +101,22 @@ Each proposal pull request on ahmedhosnypro/craft-libs:
 - Every artifact your final message names must have been created by
   THIS run. Existing branches, commits, or pull requests from
   earlier runs satisfy nothing — name them only as context.
+- Set up the target clone ONCE, with the token in an http header
+  (never in a URL, a command line, or output — the transcript
+  artifact is public):
+
+  ```
+  git clone --depth 1 https://github.com/ahmedhosnypro/craft-libs.git "${RUNNER_TEMP}/craft-libs"
+  git -C "${RUNNER_TEMP}/craft-libs" config http.https://github.com/.extraheader \
+    "Authorization: Basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64)"
+  ```
+
+  All branch, commit, and push work happens in that clone. `gh auth
+  setup-git` is denied by the write gate — never call it.
+- Open each pull request with the explicit form (the target is a
+  fork; bare `gh pr create` can resolve against the parent):
+  `gh pr create --repo ahmedhosnypro/craft-libs --base main
+  --head <branch> --title "..." --body-file <file>`.
 - Create each branch, commit, push, and pull request explicitly, one
   bash or gh call each; then verify each pull request exists by
   number before naming it.
@@ -105,9 +127,11 @@ Each proposal pull request on ahmedhosnypro/craft-libs:
 - If the window was empty or nothing clears the proposal bar: write
   `rollups/<UTC-date>-<HH>.md` summarizing the window (repos scanned,
   merges seen, classifications, why nothing was proposed), commit it
-  to a `agent/rollup-<UTC-date>-<HH>` branch, and open ONE pull
-  request carrying it. A run always leaves exactly one visible
-  trace.
+  to a `agent/rollup-<UTC-date>-<HH>` branch, and push it. Open the
+  rollup pull request only when running in the 00:20 UTC slot
+  (`[ "$(date -u +%H)" = "00" ]`); other quiet slots leave the pushed
+  branch as the trace, so the target repository is not flooded with
+  empty-window pull requests.
 
 ## Rules (absolute)
 

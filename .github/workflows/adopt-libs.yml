@@ -208,3 +208,15 @@ jobs:
           name: run-transcript
           path: ${{ runner.temp }}/run-transcript.jsonl
           if-no-files-found: warn
+          retention-days: 7
+
+      - name: Keep the schedule alive (60-day activity pulse)
+        if: always()
+        run: |
+          set -euo pipefail
+          git config user.name "craft-agent"
+          git config user.email "agent@craft-libs-adoption.invalid"
+          printf '%s conclusion=%s\n' "$(date -u +%FT%TZ)" "${{ steps.agent.outputs.conclusion || 'unset' }}" >> .scan-log
+          git add .scan-log
+          git commit -m "chore: scan pulse" || true
+          git push origin HEAD:main

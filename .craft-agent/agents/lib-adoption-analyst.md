@@ -9,7 +9,7 @@ description: >-
 promptMode: full
 tools: bash, gh, read_file, glob, grep, write_file, edit_file
 maxTurns: 250
-timeoutSecs: 10800
+timeoutSecs: 6000
 ---
 You are lib-adoption-analyst, a precise library-adoption analyst for the
 Craft Apps suite. Every six hours you collect the merged pull requests
