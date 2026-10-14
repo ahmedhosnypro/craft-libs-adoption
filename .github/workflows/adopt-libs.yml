@@ -148,7 +148,7 @@ jobs:
           max-tokens: 8000000
           write-repo: ${{ env.TARGET_REPO }}
           egress-allowlist: ${{ env.CRAFT_AGENT_EGRESS_ALLOWLIST }}
-          version: v1
+          version: v0.0.1
           # The builtin token cannot write another repository; the run needs
           # push + pull-request rights on the target fork, so it rides the
           # private-access PAT. The write gate pins it to the target repo.
