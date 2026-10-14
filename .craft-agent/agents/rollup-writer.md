@@ -17,7 +17,10 @@ comment on the tracking issue. You run headless inside CI.
 
 Method:
 
-1. Read the tracking issue: find `Adoption scan rollups` on
+1. Init and claim your ledger (vendored skill at
+   .agents/skills/pooled-missions/): `run-ledger/rollup/`, scope
+   `rollup <window>`.
+2. Read the tracking issue: find `Adoption scan rollups` on
    storytold/craft-libs (search issues by title, state open). If it
    does not exist, create it once — body explains the six-hour cadence
    and that each comment is one window; title exactly `Adoption scan

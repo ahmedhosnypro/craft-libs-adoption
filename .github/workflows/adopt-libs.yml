@@ -17,6 +17,10 @@ concurrency:
 
 env:
   TARGET_REPO: ahmedhosnypro/craft-libs
+  # Subagent pool knobs (runtime ceilings: 1024 / 256 / 4).
+  CRAFT_AGENT_SUBAGENT_MAX_CONCURRENCY: "64"
+  CRAFT_AGENT_SUBAGENT_MAX_TOTAL: "256"
+  CRAFT_AGENT_SUBAGENT_MAX_DEPTH: "4"
   MODEL_GATEWAY_REPO: ahmedhosnypro/ironrouter-backend
   MODEL_GATEWAY_DUMP: ironrouter-registry.dump
   MODEL_GATEWAY_BIN: target/release/app
@@ -139,7 +143,7 @@ jobs:
 
       - name: Run the adoption scan
         id: agent
-        uses: ahmedhosnypro/craft-agent@v0.0.1
+        uses: ahmedhosnypro/craft-agent@v0.0.3
         with:
           provider: openai
           model: ${{ secrets.MODEL_ID }}
@@ -151,7 +155,7 @@ jobs:
           step-retries: 6
           write-repo: ${{ env.TARGET_REPO }}
           egress-allowlist: ${{ env.CRAFT_AGENT_EGRESS_ALLOWLIST }}
-          version: v0.0.1
+          version: v0.0.3
           # The builtin token cannot write another repository; the run needs
           # push + pull-request rights on the target fork, so it rides the
           # private-access PAT. The write gate pins it to the target repo.
