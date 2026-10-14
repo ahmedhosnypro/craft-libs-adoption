@@ -21,7 +21,7 @@ env:
   MODEL_GATEWAY_DUMP: ironrouter-registry.dump
   MODEL_GATEWAY_BIN: target/release/app
   MODEL_GATEWAY_PORT: "17844"
-  EXPECTED_MODEL: glm-5.3-flash
+  EXPECTED_MODEL: glm-5.3
   CRAFT_AGENT_EGRESS_ALLOWLIST: github.com,api.github.com,codeload.github.com,objects.githubusercontent.com
 
 jobs:
