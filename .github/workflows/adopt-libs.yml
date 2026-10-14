@@ -146,6 +146,10 @@ jobs:
           args: --agent lib-adoption-analyst
           max-turns: 250
           max-tokens: 8000000
+          # glm-5.3 rides a slow upstream (p95 ~3 min, ~4% error tail);
+          # a 110-minute run died at turn 53 after 2 attempts. Give each
+          # model step room to survive transient drops.
+          step-retries: 6
           write-repo: ${{ env.TARGET_REPO }}
           egress-allowlist: ${{ env.CRAFT_AGENT_EGRESS_ALLOWLIST }}
           version: v0.0.1
