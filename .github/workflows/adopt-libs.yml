@@ -16,8 +16,6 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  RELEASE_REPO: ahmedhosnypro/craft-agent
-  CRAFT_AGENT_VERSION: v1
   TARGET_REPO: ahmedhosnypro/craft-libs
   MODEL_GATEWAY_REPO: ahmedhosnypro/ironrouter-backend
   MODEL_GATEWAY_DUMP: ironrouter-registry.dump
@@ -128,84 +126,43 @@ jobs:
             exit 1
           fi
 
-      - name: Install craft-agent
-        env:
-          PRIVATE_REPO_ACCESS_TOKEN: ${{ secrets.PRIVATE_REPO_ACCESS_TOKEN }}
+      - name: Load the mission prompt
+        id: mission
         run: |
           set -euo pipefail
-          umask 077
-          bin_dir="${RUNNER_TEMP}/craft-bin"
-          mkdir -p "$bin_dir"
-          export GH_TOKEN="$PRIVATE_REPO_ACCESS_TOKEN"
-          release_json="$(gh api "repos/${RELEASE_REPO}/releases/tags/${CRAFT_AGENT_VERSION}")"
-          for name in checksums.txt craft-agent-x86_64-unknown-linux-musl \
-                      craft-helpers-x86_64-unknown-linux-musl; do
-            asset_id="$(printf '%s' "$release_json" | jq -r --arg n "$name" \
-              '.assets[] | select(.name == $n) | .id')"
-            if [ -z "$asset_id" ] || [ "$asset_id" = "null" ]; then
-              echo "::error::release ${CRAFT_AGENT_VERSION} carries no asset named ${name}"
-              exit 1
-            fi
-            curl -fsSL -H "Authorization: Bearer ${PRIVATE_REPO_ACCESS_TOKEN}" \
-              -H "Accept: application/octet-stream" -o "${bin_dir}/${name}" \
-              "https://api.github.com/repos/${RELEASE_REPO}/releases/assets/${asset_id}" \
-              || gh release download "${CRAFT_AGENT_VERSION}" -R "${RELEASE_REPO}" \
-                --pattern "${name}" --dir "${bin_dir}" --clobber
-          done
-          (
-            cd "$bin_dir"
-            sha256sum --check checksums.txt --ignore-missing
-          )
-          sudo install -m 0755 "${bin_dir}/craft-agent-x86_64-unknown-linux-musl" /usr/local/bin/craft-agent
-          sudo install -m 0755 "${bin_dir}/craft-helpers-x86_64-unknown-linux-musl" /usr/local/bin/craft-helpers
+          {
+            echo "text<<MISSION_EOF"
+            cat missions/adopt-libs.md
+            echo "MISSION_EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Run the adoption scan
         id: agent
-        env:
-          MODEL_API_URL: ${{ secrets.MODEL_API_URL }}
-          MODEL_API_KEY: ${{ secrets.MODEL_API_KEY }}
-          MODEL_ID: ${{ secrets.MODEL_ID }}
+        uses: ahmedhosnypro/craft-agent@v0.0.1
+        with:
+          provider: openai
+          model: ${{ secrets.MODEL_ID }}
+          prompt: ${{ steps.mission.outputs.text }}
+          args: --agent lib-adoption-analyst
+          max-turns: 250
+          max-tokens: 8000000
+          write-repo: ${{ env.TARGET_REPO }}
+          egress-allowlist: ${{ env.CRAFT_AGENT_EGRESS_ALLOWLIST }}
+          version: v1
           # The builtin token cannot write another repository; the run needs
           # push + pull-request rights on the target fork, so it rides the
           # private-access PAT. The write gate pins it to the target repo.
-          GH_TOKEN: ${{ secrets.PRIVATE_REPO_ACCESS_TOKEN }}
-        run: |
-          set -euo pipefail
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          git config --global user.name "craft-agent"
-          git config --global user.email "agent@craft-libs-adoption.invalid"
-          export CRAFT_AGENT_PROVIDER=openai
-          export CRAFT_AGENT_MODEL="${MODEL_ID}"
-          export OPENAI_BASE_URL="${MODEL_API_URL}"
-          export OPENAI_API_KEY="${MODEL_API_KEY}"
-          export CRAFT_AGENT_WRITE_REPO="${TARGET_REPO}"
-          transcript="${RUNNER_TEMP}/run-transcript.jsonl"
-          set +e
-          craft-agent run --agent lib-adoption-analyst --prompt missions/adopt-libs.md \
-            --max-turns 250 --max-tokens 8000000 --output-format stream-json \
-            > "$transcript"
-          rc=$?
-          set -e
-          case "$rc" in
-            0) conclusion="success" ;;
-            2) conclusion="max-turns" ;;
-            3) conclusion="budget" ;;
-            *) conclusion="error" ;;
-          esac
-          echo "conclusion=${conclusion}" >> "$GITHUB_OUTPUT"
-          echo "exit-code=${rc}" >> "$GITHUB_OUTPUT"
-          if [ "$rc" -ne 0 ]; then
-            echo "::error::craft-agent exited ${rc} (${conclusion})"
-            tail -n 5 "$transcript" || true
-          fi
-          exit "$rc"
+          github-token: ${{ secrets.PRIVATE_REPO_ACCESS_TOKEN }}
+        env:
+          OPENAI_BASE_URL: ${{ secrets.MODEL_API_URL }}
+          OPENAI_API_KEY: ${{ secrets.MODEL_API_KEY }}
 
       - name: Upload the run transcript
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: run-transcript
-          path: ${{ runner.temp }}/run-transcript.jsonl
+          path: ${{ runner.temp }}/craft-agent-stream.jsonl
           if-no-files-found: warn
           retention-days: 7
 
