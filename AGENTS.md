@@ -6,8 +6,8 @@ files evidence-backed findings as issues on `ahmedhosnypro/craft-libs`
 (aligned with its RFC convention and its extraction map, issue #94),
 and opens mechanical pin-bump pull requests on lagging app repos. The
 runs are performed by the `craft-agent` action talking to a private
-model gateway; the analysis persona lives in
-`.craft-agent/agents/lib-adoption-analyst.md` and the mission in
+model gateway; the orchestrator persona and its five specialist
+subagents live in `.craft-agent/agents/` and the mission in
 `missions/adopt-libs.md`.
 
 ## File map
@@ -17,7 +17,8 @@ model gateway; the analysis persona lives in
 | `.github/workflows/adopt-libs.yml` | the scan: cron at 00:20/06:20/12:20/18:20 UTC + manual dispatch |
 | `config/repo-list.txt` | the repos scanned, their archetypes, watch-paths, candidates |
 | `missions/adopt-libs.md` | the mission text the agent executes |
-| `.craft-agent/agents/lib-adoption-analyst.md` | the persona (validated by craft-agent's loader) |
+| `.craft-agent/agents/` | the orchestrator (lib-adoption-analyst) and its five specialists (window-collector, merge-classifier, finding-filer, revsync-applier, rollup-writer) — validated by craft-agent's loader |
+| `.agents/skills/pooled-missions/` | the pooled-run skill: ledger and pool discipline the orchestrator follows |
 | `rollups/` | legacy: rollup documents from the proposal-PR era; the scan now posts rollups as comments on the upstream tracking issue |
 
 ## Running a scan

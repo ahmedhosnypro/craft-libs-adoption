@@ -21,13 +21,14 @@ env:
   MODEL_GATEWAY_DUMP: ironrouter-registry.dump
   MODEL_GATEWAY_BIN: target/release/app
   MODEL_GATEWAY_PORT: "17844"
-  EXPECTED_MODEL: glm-5.3
+  EXPECTED_MODEL: github-actions
   CRAFT_AGENT_EGRESS_ALLOWLIST: github.com,api.github.com,codeload.github.com,objects.githubusercontent.com
 
 jobs:
   scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 240
+    # 6h — the maximum job wall-clock on free public-repo runners.
+    timeout-minutes: 360
     steps:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -145,10 +146,8 @@ jobs:
           prompt: ${{ steps.mission.outputs.text }}
           args: --agent lib-adoption-analyst
           max-turns: 250
-          max-tokens: 8000000
-          # glm-5.3 rides a slow upstream (p95 ~3 min, ~4% error tail);
-          # a 110-minute run died at turn 53 after 2 attempts. Give each
-          # model step room to survive transient drops.
+          max-tokens: 32000000
+          # Ride out transient gateway drops mid-run.
           step-retries: 6
           write-repo: ${{ env.TARGET_REPO }}
           egress-allowlist: ${{ env.CRAFT_AGENT_EGRESS_ALLOWLIST }}
