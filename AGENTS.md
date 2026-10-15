@@ -18,7 +18,7 @@ subagents live in `.craft-agent/agents/` and the mission in
 | `.github/workflows/adopt-libs.yml` | the scan: cron at 00:20/06:20/12:20/18:20 UTC + manual dispatch |
 | `config/repo-list.txt` | the repos scanned, their archetypes, watch-paths, candidates |
 | `missions/adopt-libs.md` | the mission text the agent executes |
-| `.craft-agent/agents/` | the orchestrator (lib-adoption-analyst) and its five specialists (window-collector, merge-classifier, finding-filer, revsync-applier, rollup-writer) — validated by craft-agent's loader |
+| `.craft-agent/agents/` | the orchestrator (lib-adoption-analyst) and its four specialists (merge-classifier, finding-filer, revsync-applier, rollup-writer) — validated by craft-agent's loader |
 | `.agents/skills/pooled-missions/` | the pooled-run skill: ledger and pool discipline the orchestrator follows |
 | `rollups/` | legacy: rollup documents from the proposal-PR era; the scan now posts rollups as comments on the tracking issue on `ahmedhosnypro/craft-libs` |
 
