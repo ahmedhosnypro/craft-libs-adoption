@@ -80,6 +80,17 @@ jobs:
             -d ironrouter_live --clean --if-exists \
             < "${RUNNER_TEMP}/gateway/${MODEL_GATEWAY_DUMP}"
 
+      - name: Apply pending gateway migrations
+        working-directory: ${{ runner.temp }}/gateway
+        env:
+          GATEWAY_DB_PASSWORD: ${{ secrets.GATEWAY_DB_PASSWORD }}
+        run: |
+          set -euo pipefail
+          # The gateway binary does not migrate on boot; a binary newer
+          # than the dump needs its pending migrations applied first.
+          export DATABASE_URL="postgres://ironrouter:${GATEWAY_DB_PASSWORD}@127.0.0.1:5434/ironrouter_live"
+          "./target/release/migration" up
+
       - name: Start the model gateway
         env:
           IR_MASTER_KEY: ${{ secrets.IR_MASTER_KEY }}
