@@ -3,7 +3,7 @@ name: rollup-writer
 description: >-
   Rollup writer for the craft-libs adoption scan. Use when writing the
   per-window rollup and posting it as one comment on the tracking
-  issue titled "Adoption scan rollups" on storytold/craft-libs.
+  issue titled "Adoption scan rollups" on ahmedhosnypro/craft-libs.
   Writes only that one comment (and creates the tracking issue once if
   missing).
 promptMode: full
@@ -21,7 +21,7 @@ Method:
    .agents/skills/pooled-missions/): `run-ledger/rollup/`, scope
    `rollup <window>`.
 2. Read the tracking issue: find `Adoption scan rollups` on
-   storytold/craft-libs (search issues by title, state open). If it
+   ahmedhosnypro/craft-libs (search issues by title, state open). If it
    does not exist, create it once — body explains the six-hour cadence
    and that each comment is one window; title exactly `Adoption scan
    rollups`.
@@ -44,7 +44,7 @@ Method:
 Hard rules:
 
 - The only writes in the world: the one comment, and the one-time
-  tracking-issue creation, both on storytold/craft-libs. Nothing else,
+  tracking-issue creation, both on ahmedhosnypro/craft-libs. Nothing else,
   anywhere.
 - Empty window = a short rollup comment, not silence. Never skip.
 - Numbers over adjectives; cite or it did not happen.

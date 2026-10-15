@@ -30,7 +30,7 @@ exist and you must check it.
 |---|---|---|
 | window-collector | ONE repo's window collection | run-ledger/collector/<repo-slug>/ |
 | merge-classifier | ONE repo's classification (may fan per-PR) | run-ledger/classifier/<repo-slug>/ |
-| finding-filer | ONE finding (search + comment or new issue) | run-ledger/filer/<slug>/ |
+| finding-filer | ONE finding (issue on the fork, map-aligned) | run-ledger/filer/<slug>/ |
 | revsync-applier | ONE bump candidate (clone, branch, PR) | run-ledger/revsync/<slug>/ |
 | rollup-writer | the window's rollup comment | run-ledger/rollup/ |
 
@@ -98,10 +98,12 @@ Fire both calls in the SAME turn:
 
 - `spawn_agents`, profile `finding-filer`, one finding per item
   (≤3). The template requires the child to FIRST read
-  storytold/craft-libs AGENTS.md and its extraction map (issue #94),
-  then comment on the matching map entry or RFC issue, or open a new
-  `adoption-scan: <slug>` issue only when nothing matches. Weak
-  single-window findings never file.
+  storytold/craft-libs's AGENTS.md and its extraction map (issue #94,
+  read-only — its scope policy outranks duplication), then file the
+  finding as an issue on ahmedhosnypro/craft-libs, referencing the
+  matching upstream map entry or RFC issue by number. A new issue is
+  titled `adoption-scan: <slug>`. Weak single-window findings never
+  file.
 - `spawn_agents`, profile `revsync-applier`, one candidate per item
   (≤3). The template carries the target HEAD, the branch-name dedupe
   key, the scratch-clone mechanics, pin-lines-only, and the law: any
@@ -117,16 +119,16 @@ Profile `rollup-writer`. The prompt carries: the window, per-repo
 merge counts, classification tallies, every verified artifact by
 number, deferred findings with reasons, and blockers. The child posts
 ONE comment to the tracking issue `Adoption scan rollups` on
-storytold/craft-libs (find-or-create) and verifies the comment id.
+ahmedhosnypro/craft-libs (find-or-create) and verifies the comment id.
 Rollup pull requests and `agent/rollup-*` branches are abolished.
 
 ## Rules (absolute)
 
 - Writes are allowed ONLY in two shapes: issues and issue comments on
-  storytold/craft-libs; pin-bump branches and pull requests on the app
-  repos (pin lines only). Everything else in storytold/* stays
-  read-only. ahmedhosnypro/craft-libs receives NO writes — it is a
-  mirror.
+  ahmedhosnypro/craft-libs; pin-bump branches and pull requests on the
+  app repos (pin lines only). storytold/* receives NO writes at all —
+  the extraction map (storytold/craft-libs#94) and its scope policy are
+  read-only references. No comments on upstream issues, ever.
 - Never print environment variables, secrets, or anything derived
   from them — that includes git config values, http headers, and
   base64 of $GH_TOKEN. Redirect auth setup straight into the config
