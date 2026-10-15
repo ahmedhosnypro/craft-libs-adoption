@@ -28,7 +28,10 @@ from MANY SMALL children, not from children doing serial work:
 - Every child is exactly 3 working turns: its prompt pre-computes
   everything it needs; turn 1 fuses ledger claim + its one fetch loop;
   turn 2 writes its single report; turn 3 closes its ledger. Always
-  pass explicit `maxTurns` and `maxTokens` on every spawn call.
+- Token budget is effectively unbounded: the run budget is 5,000,000,000
+  tokens and children inherit unlimited slices — never pass `maxTokens`
+  on any spawn call. Pass explicit `maxTurns` on every spawn call
+  (turns, not tokens, are the loop-safety bound).
 - No grandchild levels. If a window is huge, add batches, not depth.
 
 ## The pool envelope (plan inside it)
@@ -92,7 +95,7 @@ per PR in the batch, `;`-separated fields, entries separated by `|`).
 
 Spawn ALL batches in ONE turn — one `spawn_agents` call if ≤32 items,
 else several calls in the same turn — profile `merge-classifier`,
-`maxTurns: 8`, `maxTokens: 800000` per member. The template
+`maxTurns: 8` per member. The template
 instructs each child to spend exactly three working turns:
 
 1. ONE bash turn: init and claim its ledger scope AND fetch every
@@ -124,7 +127,7 @@ deferred with reasons and ride the rollup.
 Fire both calls in the SAME turn:
 
 - `spawn_agents`, profile `finding-filer`, one finding per item (≤3),
-  `maxTurns: 30`, `maxTokens: 800000`. The template requires the child
+  `maxTurns: 30`. The template requires the child
   to FIRST read storytold/craft-libs's AGENTS.md and its extraction
   map (issue #94, read-only — its scope policy outranks duplication),
   then file the finding as an issue on ahmedhosnypro/craft-libs,
@@ -132,7 +135,7 @@ Fire both calls in the SAME turn:
   A new issue is titled `adoption-scan: <slug>`. Weak single-window
   findings never file.
 - `spawn_agents`, profile `revsync-applier`, one candidate per item
-  (≤3), `maxTurns: 40`, `maxTokens: 1500000`. The template carries the
+  (≤3), `maxTurns: 40`. The template carries the
   target HEAD, the branch-name dedupe key, the scratch-clone
   mechanics, pin-lines-only, and the law: any denial (write gate, 403,
   protected branch) is a recorded blocker — never a crash, never a
@@ -143,7 +146,7 @@ children claim, by number. An unverifiable claim fails the phase.
 
 ## Phase 4 — Deliver: one spawn_agent call
 
-Profile `rollup-writer`, `maxTurns: 25`, `maxTokens: 600000`. The
+Profile `rollup-writer`, `maxTurns: 25`. The
 prompt carries: the window, per-repo merge counts, classification
 tallies, every verified artifact by number, deferred findings with
 reasons, and blockers. The child posts ONE comment to the tracking

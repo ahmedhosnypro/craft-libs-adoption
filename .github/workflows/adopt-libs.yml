@@ -150,7 +150,7 @@ jobs:
           prompt: ${{ steps.mission.outputs.text }}
           args: --agent lib-adoption-analyst
           max-turns: 250
-          max-tokens: 32000000
+          max-tokens: 5000000000
           # Ride out transient gateway drops mid-run.
           step-retries: 6
           write-repo: ${{ env.TARGET_REPO }}
