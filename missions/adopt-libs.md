@@ -22,13 +22,13 @@ from MANY SMALL children, not from children doing serial work:
 - You collect the whole window in ONE craft-helpers invocation (all
   repos at once) plus a REST loop when capped — two orchestrator turns
   at most. Children never collect.
-- Shard raw PRs into batches of at most 12; one classifier child per
+- Shard raw PRs into batches of at most 18; one classifier child per
   batch, ALL batches fired in one turn (multiple spawn_agents calls
   when a window exceeds 32 batches — same turn, never sequential).
-- Every child is 3-5 turns of work: its prompt pre-computes everything
-  it needs; its one bash loop fetches all its file lists in one go; it
-  writes one report file and stops. Always pass explicit `maxTurns`
-  and `maxTokens` on every spawn call.
+- Every child is exactly 3 working turns: its prompt pre-computes
+  everything it needs; turn 1 fuses ledger claim + its one fetch loop;
+  turn 2 writes its single report; turn 3 closes its ledger. Always
+  pass explicit `maxTurns` and `maxTokens` on every spawn call.
 - No grandchild levels. If a window is huge, add batches, not depth.
 
 ## The pool envelope (plan inside it)
@@ -45,7 +45,7 @@ from MANY SMALL children, not from children doing serial work:
 
 | agent | one child handles | own ledger |
 |---|---|---|
-| merge-classifier | ONE batch of ≤12 window PRs across any repos | run-ledger/classifier/batch-<NN>/ |
+| merge-classifier | ONE batch of ≤18 window PRs across any repos | run-ledger/classifier/batch-<NN>/ |
 | finding-filer | ONE finding (issue on the fork, map-aligned) | run-ledger/filer/<slug>/ |
 | revsync-applier | ONE bump candidate (clone, branch, PR) | run-ledger/revsync/<slug>/ |
 | rollup-writer | the window's rollup comment | run-ledger/rollup/ |
@@ -64,27 +64,26 @@ from MANY SMALL children, not from children doing serial work:
 
 ## Phase 1 — Collect the window (yourself, ≤2 turns)
 
-1. Primary: `craft-helpers prs --org storytold --repos <all 17 names
-   from config/repo-list.txt, comma-separated> --since <window>
+1. ONE bash turn: `craft-helpers prs --org storytold --repos <all 17
+   names from config/repo-list.txt, comma-separated> --since <window>
    --limit-per-repo 100 --max-prs 500 --json > prs.json` (check
    `craft-helpers prs --help` for the exact `--since` syntax; the
-   binary is on PATH).
-2. Trust but verify: pick 2 repos and cross-check their counts with
-   one-line gh queries (`gh api "repos/<full>/pulls?state=closed"`
-   page 1). If the helper reports 0 for a repo you know had merges,
-   or its output carries a truncation marker, treat it as stale and
-   fall back for EVERY repo: a single bash loop paging
+   binary is on PATH), THEN in the same command spot-verify 2 repos'
+   counts with one-line gh queries and write `collection.md` (window,
+   per-repo counts, total, path used, anomalies). Collection,
+   verification, and the audit file in one turn.
+2. If the helper reports 0 for a repo that plainly had merges, or its
+   output carries a truncation marker: treat it as stale and fall back
+   for EVERY repo — one more bash turn running a loop that pages
    `gh api --method GET "repos/<full>/pulls?state=closed&sort=updated
    &direction=desc&per_page=100"` (GET only, never `-f`, no
    `--paginate`), keeping rows with `merged_at >= since`, early-exit
    when a page's max `updated_at` predates `since`, page cap 15 per
-   repo — all inside one bash turn, appending to rows.jsonl.
-3. Write `collection.md`: window, per-repo merge counts, total, which
-   path was used (helper or REST), anomalies.
+   repo, appending to rows.jsonl, then rewrite `collection.md`.
 
 ## Phase 2 — Classify: shard raw PRs, one spawn per batch
 
-Build batches of at most 12 merges each (PRs may mix repos in one
+Build batches of at most 18 merges each (PRs may mix repos in one
 batch; keep each batch single-org). For every batch build one item of
 the form:
 
@@ -93,20 +92,24 @@ per PR in the batch, `;`-separated fields, entries separated by `|`).
 
 Spawn ALL batches in ONE turn — one `spawn_agents` call if ≤32 items,
 else several calls in the same turn — profile `merge-classifier`,
-`maxTurns: 12`, `maxTokens: 800000` per member. The template
-instructs each child to:
+`maxTurns: 8`, `maxTokens: 800000` per member. The template
+instructs each child to spend exactly three working turns:
 
-1. Fetch the files list for EVERY PR in its batch with ONE bash loop
-   (`gh api repos/<r>/pulls/<n>/files --jq ...` per entry, all in a
-   single command) — never one turn per PR.
-2. Classify each PR (`rev-sync` / `hoist` / `port` / `irrelevant`):
-   inside its repo's watch-paths, read the fetched file lists (a
-   shared-named crate with app-model churn is NOT generic); outside
-   them, one line, no reading.
-3. Write `classifications/batch-<NN>.md`: verdict per PR (number,
-   repo, title, verdict, one-line reason, files evidence), tallies.
-   Init and close its ledger scope (claim → done) at
-   `run-ledger/classifier/batch-<NN>/`.
+1. ONE bash turn: init and claim its ledger scope AND fetch every
+   PR's file list (`gh api repos/<r>/pulls/<n>/files --jq ...` per
+   entry) in the same single command — never one turn per PR, never a
+   turn for the ledger alone.
+2. ONE write turn: compose the verdicts and write
+   `classifications/batch-<NN>.md` — verdict per PR (number, repo,
+   title, verdict, one-line reason, files evidence), tallies line.
+3. ONE bash turn: `scope-done` (or `scope-fail` with the gap).
+
+Classification rules: inside its repo's watch-paths, judge the fetched
+file lists (`rev-sync` — a craft-libs pin bump, record old/new rev;
+`hoist` — a candidate crate changed generically, app-model churn is
+NOT generic even inside a shared-named crate; `port` — a
+source-archetype contract change rippling to apps' recipes); outside
+them, `irrelevant`, one line, no reading.
 
 Verify on return: every batch report exists and its verdict count
 equals its batch size; spot-check two PRs' verdicts against their real
