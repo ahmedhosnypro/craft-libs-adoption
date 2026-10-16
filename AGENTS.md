@@ -20,6 +20,7 @@ subagents live in `.craft-agent/agents/` and the mission in
 | `missions/adopt-libs.md` | the mission text the agent executes |
 | `.craft-agent/agents/` | the orchestrator (lib-adoption-analyst) and its four specialists (merge-classifier, finding-filer, revsync-applier, rollup-writer) — validated by craft-agent's loader |
 | `.agents/skills/pooled-missions/` | the pooled-run skill: ledger and pool discipline the orchestrator follows |
+| `.agents/skills/mermaid-diagrams/` | the diagram skill finding-filer uses — extraction diagrams in finding issues, always validated before filing |
 | `rollups/` | legacy: rollup documents from the proposal-PR era; the scan now posts rollups as comments on the tracking issue on `ahmedhosnypro/craft-libs` |
 
 ## Running a scan

@@ -136,9 +136,14 @@ Fire both calls in the SAME turn:
 - `spawn_agents`, profile `finding-filer`, one finding per item (≤3),
   `maxTurns: 30`. The template requires the child to FIRST read
   storytold/craft-libs's AGENTS.md and its extraction map (issue #94,
-  read-only — its scope policy outranks duplication), then file the
-  finding as an issue on ahmedhosnypro/craft-libs, referencing the
-  matching upstream map entry or RFC issue by number. A new issue is
+  read-only — its scope policy outranks duplication) and the vendored
+  mermaid skill (.agents/skills/mermaid-diagrams/SKILL.md), then file
+  the finding as an issue on ahmedhosnypro/craft-libs carrying ONE
+  mermaid diagram of the extraction — VALIDATED before filing
+  (bundled validator under bun when present, else the skill's
+  structural checks via python3; any failure means fix-or-drop — an
+  unvalidated diagram never ships) — referencing the matching
+  upstream map entry or RFC issue by number. A new issue is
   titled `adoption-scan: <slug>`.
 - `spawn_agents`, profile `revsync-applier`, one candidate per item
   (≤3), `maxTurns: 40`. The template carries the target HEAD, the
