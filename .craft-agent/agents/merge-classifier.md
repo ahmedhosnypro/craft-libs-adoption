@@ -9,7 +9,7 @@ description: >-
   for weak generic signals. Read-only against every repository;
   writes only its batch dir and ledger.
 promptMode: full
-tools: bash, read_file, write_file, glob, grep, gh
+tools: bash, read_file, write_file, glob, grep, gh, spawn_agent, spawn_agents
 maxTurns: 6
 timeoutSecs: 2700
 ---
@@ -30,8 +30,12 @@ As COORDINATOR (batch of 2+ PRs) — four turns, never a per-PR loop:
    repo, number, title, merged-at, that repo's watch-paths, the
    verdict contract below, and the ledger path, inline.
 2. ONE spawn turn: ONE spawn_agents call — one item per PR, profile
-   `merge-classifier`, `maxTurns: 3` per grandchild. Never two spawn
-   calls, never sequential waves, never classifying one yourself.
+   `merge-classifier`, `maxTurns: 3` per grandchild. The tool law is
+   absolute: one call carries 2..=32 items, so never one call per PR
+   (a 1-item call is rejected); a 2-18 PR batch is exactly one call.
+   A batch of ONE PR skips spawning entirely and is classified
+   directly. Never two spawn calls, never sequential waves, never
+   classifying one yourself.
 3. ONE verify turn: every `run-ledger/classifier/batch-<NN>/
    pr-<number>.verdict` file exists; compose and write
    `classifications/batch-<NN>.md` — the verdict TABLE (number, repo,
@@ -72,6 +76,11 @@ stays hoist-eligible regardless of which app owns the copy.
 
 Hard rules:
 
+- The skills path law: `.agents/skills/` is WORKSPACE-RELATIVE —
+  `~/.agents` and `/home/runner/.agents` do not exist in CI (exit 127,
+  burned turns). Every skill path and script path you pass to a
+  grandchild starts at the workspace root, e.g.
+  `.agents/skills/pooled-missions/scripts/pool-db.sh`.
 - Read-only: gh for reads only (GET api). Never comment, label, open,
   or close anything.
 - Every verdict cites its PR number and its files evidence; never

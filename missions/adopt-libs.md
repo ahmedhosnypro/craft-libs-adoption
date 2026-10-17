@@ -30,8 +30,15 @@ from MANY SMALL children, not from children doing serial work:
 - You collect the whole window yourself in one REST sweep — two
   orchestrator turns at most. Children never collect the window.
 - Shard raw PRs into batches of at most 18; one classifier child per
-  batch, ALL batches fired in one turn (multiple spawn_agents calls
-  when a window exceeds 32 batches — same turn, never sequential).
+  batch. THE TOOL LAW: `spawn_agents` is ONE call carrying many items —
+  its `items` array holds 2..=32 entries and the call is REJECTED below
+  two. Never issue one call per batch with a single item ("items must
+  be 2..=32 entries, got 1" is your own call being wrong — add the other
+  batches to the same call, it is not a signal to fall back to
+  per-batch calls). Shoot ALL classifier batches as separate items of
+  ONE `spawn_agents` call in one turn; only when a window exceeds 32
+  batches split them across multiple calls — every call still carries
+  2..=32 items, all calls in the SAME turn.
 - Per-item work never loops inside one agent. A batch child with more
   than one PR spawns ONE grandchild per PR in a single spawn_agents
   call and only aggregates; a one-PR batch is classified directly.
@@ -91,7 +98,7 @@ silently undercounted; REST always wins). `collection.md` records the
 window and the helper/REST/final table — workspace audit only; a
 mismatch is an EXCEPTION that surfaces in the window comment.
 
-## Phase 2 — Classify: shard raw PRs, one spawn per batch
+## Phase 2 — Classify: shard raw PRs, one spawn_agents call
 
 Build batches of at most 18 merges each (PRs may mix repos; keep each
 batch single-org). Batch numbering starts at 01 and is dense — a
@@ -101,8 +108,19 @@ every batch build one item of the form:
 
 `batch-<NN>|<owner/repo>#<number>;<title>;<merged-at>|...`
 
-Spawn ALL batches in ONE turn — profile `merge-classifier`,
-`maxTurns: 6` per member. A batch child never loops over its PRs:
+ONE `spawn_agents` CALL carries ALL batches: the `items` array is the
+list of batches, one item per batch (`batch-<NN>|<owner/repo>#<number>;
+<title>;<merged-at>|...`), profile `merge-classifier`, `maxTurns: 6`.
+The tool law is absolute — 2..=32 items per call, so a window of 1-32
+batches is exactly one call; more than 32 batches splits into multiple
+calls of 2..=32 items each, ALL in the same turn. A rejected call
+("items must be 2..=32 entries") means fix the call shape (merge or
+rebalance the items), never split into one call per batch — a
+batch-only spawn wave of 1-item calls is a FAILED phase: zero
+classifiers run. A window that shards into a SINGLE batch is not an
+exception: spawn that one batch with the single `spawn_agent` tool
+(same prompt content, no `items` array). A batch child never loops
+over its PRs:
 turn 1 claims its ledger and splits the batch into per-PR grandchild
 prompts (repo, number, title, merged-at, that repo's watch-paths, and
 the verdict contract inline); turn 2 fires ONE spawn_agents call —
@@ -150,6 +168,12 @@ every corroborating window's merges.
 
 Fire both calls in the SAME turn:
 
+- Tool shape: one call per profile, and its `items` array must carry
+  2..=32 entries. A phase with exactly ONE item for a profile uses the
+  single `spawn_agent` tool instead (same profile, the item fills the
+  prompt) — a 1-item batch call is rejected ("items must be 2..=32
+  entries, got 1"). A rejected call means fix the call shape; never
+  respond by spawning one call per item.
 - `spawn_agents`, profile `finding-filer`, one finding per item (≤3),
   `maxTurns: 30`. The template requires the child to FIRST read
   storytold/craft-libs's AGENTS.md (read-only — its scope policy
@@ -197,6 +221,22 @@ signal.
 
 ## Rules (absolute)
 
+- The spawn tool law. TWO tools exist: `spawn_agent` (one prompt, one
+  child) and `spawn_agents` (one call, `items` array of 2..=32 batches
+  run in parallel). Use `spawn_agents` whenever the work has 2-32
+  pieces; a 1-item batch call is always rejected — a one-piece phase
+  uses `spawn_agent`, a 2-32-piece phase is ONE `spawn_agents` call
+  with every piece as an item, and a >32-piece phase splits into
+  multiple same-turn calls of 2..=32 items. Never fire one call per
+  piece.
+- The skills path law. All vendored skills live at
+  WORKSPACE-RELATIVE paths: `.agents/skills/<name>/SKILL.md`, with
+  their scripts at `.agents/skills/<name>/scripts/` — e.g. the
+  pooled-missions ledger helper is
+  `.agents/skills/pooled-missions/scripts/pool-db.sh`. `$HOME`,
+  `~/.agents`, and `/home/runner/.agents` DO NOT EXIST in CI: any path
+  through them fails (exit 127) and wastes turns. Resolve every skill
+  from the workspace root; pass that exact relative path to children.
 - Writes are allowed ONLY in two shapes: issues and issue comments on
   ahmedhosnypro/craft-libs (the tracking issue body and its comment
   stream are both issues writes on that repo); pin-bump branches and
