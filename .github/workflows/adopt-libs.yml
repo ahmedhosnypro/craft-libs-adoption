@@ -6,6 +6,11 @@ on:
     # 22:00-00:00 UTC merge burst so the first scan sees the day's work.
     - cron: "20 0,6,12,18 * * *"
   workflow_dispatch:
+    inputs:
+      model:
+        description: "Model id for this run (scheduled runs keep the MODEL_ID secret)"
+        required: false
+        default: github-actions
 
 permissions:
   contents: write
@@ -28,7 +33,8 @@ env:
   MODEL_GATEWAY_DUMP: ironrouter-registry.dump
   MODEL_GATEWAY_BIN: target/release/app
   MODEL_GATEWAY_PORT: "17844"
-  EXPECTED_MODEL: github-actions
+  # Model the gateway must serve; a manual run may override it.
+  EXPECTED_MODEL: ${{ github.event.inputs.model || 'github-actions' }}
   CRAFT_AGENT_EGRESS_ALLOWLIST: github.com,api.github.com,codeload.github.com,objects.githubusercontent.com
 
 jobs:
@@ -163,7 +169,8 @@ jobs:
         uses: ahmedhosnypro/craft-agent@v0.0.3
         with:
           provider: openai
-          model: ${{ secrets.MODEL_ID }}
+          # A manual run picks its model via the dispatch input; scheduled runs ride the secret.
+          model: ${{ github.event.inputs.model || secrets.MODEL_ID }}
           prompt: ${{ steps.mission.outputs.text }}
           args: --agent lib-adoption-analyst
           max-turns: 250
