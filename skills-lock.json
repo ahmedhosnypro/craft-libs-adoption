@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "visual-judge": {
+      "source": "ahmedhosnypro/skills",
+      "sourceType": "github",
+      "skillPath": "skills/visual-judge/SKILL.md",
+      "computedHash": "e41a48f6bd27069b387a3dc06f46df24d75e67ef751916ec1dc6c6fccaac634d"
+    }
+  }
+}
