@@ -18,6 +18,8 @@ subagents live in `.craft-agent/agents/` and the mission in
 | `.github/workflows/adopt-libs.yml` | the scan: cron at 00:20/06:20/12:20/18:20 UTC + manual dispatch |
 | `config/repo-list.txt` | the repos scanned, their archetypes, watch-paths, candidates |
 | `missions/adopt-libs.md` | the mission text the agent executes |
+| `scripts/run-scan.sh` | the mission step: installs the release binaries, runs the scan, and streams it live (mirrors the composite action, with the stream visible in the log) |
+| `scripts/stream-render.py` | live renderer of the run transcript: per-turn tool calls, spawn waves, subagent outcomes, usage, conclusion |
 | `.craft-agent/agents/` | the orchestrator (lib-adoption-analyst) and its four specialists (merge-classifier, finding-filer, revsync-applier, rollup-writer) — validated by craft-agent's loader |
 | `.agents/skills/pooled-missions/` | the pooled-run skill: ledger and pool discipline the orchestrator follows |
 | `.agents/skills/mermaid-diagrams/` | the diagram skill finding-filer uses — extraction diagrams in finding issues, always validated before filing |

@@ -164,29 +164,26 @@ jobs:
             echo "MISSION_EOF"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Run the adoption scan
+      - name: Run the adoption scan (live stream)
         id: agent
-        uses: ahmedhosnypro/craft-agent@v0.0.3
-        with:
-          provider: openai
-          # A manual run picks its model via the dispatch input; scheduled runs ride the secret.
-          model: ${{ github.event.inputs.model || secrets.MODEL_ID }}
-          prompt: ${{ steps.mission.outputs.text }}
-          args: --agent lib-adoption-analyst
-          max-turns: 250
-          max-tokens: 5000000000
+        env:
+          CRAFT_AGENT_PROVIDER: openai
+          CRAFT_AGENT_MODEL: ${{ github.event.inputs.model || secrets.MODEL_ID }}
+          CRAFT_AGENT_ARGS: --agent lib-adoption-analyst
+          CRAFT_AGENT_MAX_TURNS: "250"
+          CRAFT_AGENT_MAX_TOKENS: "5000000000"
           # Ride out transient gateway drops mid-run.
-          step-retries: 6
-          write-repo: ${{ env.TARGET_REPO }}
-          egress-allowlist: ${{ env.CRAFT_AGENT_EGRESS_ALLOWLIST }}
-          version: v0.0.3
+          CRAFT_AGENT_STEP_RETRIES: "6"
+          CRAFT_AGENT_WRITE_REPO: ${{ env.TARGET_REPO }}
+          CRAFT_AGENT_EGRESS_ALLOWLIST: ${{ env.CRAFT_AGENT_EGRESS_ALLOWLIST }}
+          CRAFT_AGENT_PROMPT: ${{ steps.mission.outputs.text }}
+          OPENAI_BASE_URL: ${{ secrets.MODEL_API_URL }}
+          OPENAI_API_KEY: ${{ secrets.MODEL_API_KEY }}
           # The builtin token cannot write another repository; the run needs
           # push + pull-request rights on the target fork, so it rides the
           # private-access PAT. The write gate pins it to the target repo.
-          github-token: ${{ secrets.PRIVATE_REPO_ACCESS_TOKEN }}
-        env:
-          OPENAI_BASE_URL: ${{ secrets.MODEL_API_URL }}
-          OPENAI_API_KEY: ${{ secrets.MODEL_API_KEY }}
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_ACCESS_TOKEN }}
+        run: bash scripts/run-scan.sh
 
       - name: Upload the run transcript
         if: always()
