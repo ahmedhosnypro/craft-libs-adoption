@@ -65,9 +65,9 @@ hoist bar is NOT discarded — add a `maturing:<slug> | <repo>#<number>
 it across windows and a second window promotes it to a finding.
 Silently dropping a generic signal is a failure of the goal.
 
-Verdict altitude: the extraction map's façade quarantine
-(storytold/craft-libs#94) excludes app-domain churn — it never
-blanket-exempts a crate. Generic hardening inside a shared-named crate
+Verdict altitude: app-domain churn is NOT generic even inside a
+shared-named crate — judge that from the per-PR file evidence, never
+from the crate's name. Generic hardening inside a shared-named crate
 stays hoist-eligible regardless of which app owns the copy.
 
 Hard rules:

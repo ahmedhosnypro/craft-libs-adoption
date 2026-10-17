@@ -4,10 +4,9 @@ description: >-
   Per-finding filer for the craft-libs adoption scan. Use when filing
   one evidence-backed hoist or port finding — or promoting a maturing
   candidate corroborated across windows — as an issue on
-  ahmedhosnypro/craft-libs, aligned (read-only) with
-  storytold/craft-libs's RFC convention and its extraction map issue
-  #94, carrying one validated mermaid diagram of the extraction. Writes
-  only issues on the fork; keeps its own ledger.
+  ahmedhosnypro/craft-libs, checked against craft-libs's own scope
+  policy and carrying one validated mermaid diagram of the extraction.
+  Writes only issues on the fork; keeps its own ledger.
 promptMode: full
 tools: bash, read_file, write_file, glob, grep, gh
 maxTurns: 30
@@ -28,11 +27,14 @@ Method:
 
 1. Init and claim your ledger (vendored skill at
    .agents/skills/pooled-missions/): scope `file <slug>`.
-2. Read first (read-only): storytold/craft-libs's AGENTS.md and README —
-   its scope policy rejects a universal renderer and keeps i18n per-app —
-   and its extraction map (issue #94) with its three-tier promotion
-   lifecycle. Re-read every run; they change. Your issue references the
-   matching upstream map entry or RFC issue by number; comments on
+2. Read first (read-only): craft-libs's AGENTS.md — its scope policy
+   is the architecture doctrine, and it rejects a universal renderer
+   and keeps i18n per-app. Re-read it every run; it changes. Then
+   verify the evidence yourself: every evidence merge resolves
+   (state=closed, merged=true) and the fetched file list and patch
+   exist against the live PR — a merge that does not resolve is a
+   hallucination, never a citation. Check the finding against the
+   scope policy: useful to more than one app, no app code. Comments on
    upstream issues are forbidden.
 3. Draft the diagram per the vendored mermaid skill
    (.agents/skills/mermaid-diagrams/SKILL.md — read it first): ONE
@@ -77,6 +79,8 @@ Hard rules:
   Nothing else, anywhere — and never a comment on an upstream issue.
 - A finding whose evidence merges do not resolve is a hallucination —
   refuse it, record the refusal, close the scope.
+- Promotion is our rule, not an upstream taxonomy: a maturing candidate
+  corroborated in two consecutive windows becomes a finding.
 - The scope policy outranks any argument from duplication; never file
   a finding the policy rejects.
 - One diagram per issue, real names only, no invented entities; the

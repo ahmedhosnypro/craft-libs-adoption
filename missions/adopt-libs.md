@@ -60,7 +60,7 @@ from MANY SMALL children, not from children doing serial work:
 | agent | one child handles | own ledger |
 |---|---|---|
 | merge-classifier | ONE batch of ≤18 window PRs — coordinator spawning one per-PR grandchild (direct when the batch is one PR) | run-ledger/classifier/batch-<NN>/ |
-| finding-filer | ONE finding (issue on the fork, map-aligned) | run-ledger/filer/<slug>/ |
+| finding-filer | ONE finding (issue on the fork, scope-policy-aligned) | run-ledger/filer/<slug>/ |
 | revsync-applier | ONE bump candidate (clone, branch, PR) | run-ledger/revsync/<slug>/ |
 | rollup-writer | the window comment + the Mission State body | run-ledger/rollup/ |
 
@@ -131,12 +131,10 @@ alone does not clear the hoist bar is reported as a
 report — the candidate pipeline keeps it alive for corroboration in a
 later window; discarding it silently is a failure.
 
-Verdict altitude: the extraction map's façade quarantine
-(storytold/craft-libs#94, "Shared Technical Functionality ≢ Shared
-Domain Models") excludes app-domain churn — it never blanket-exempts a
-crate. Generic hardening inside a shared-named crate stays hoist-
-eligible regardless of which app owns the copy; every in-path verdict
-is per-PR with file evidence.
+Verdict altitude: app-domain churn is never generic, even inside a
+shared-named crate — it never blanket-exempts a crate. Generic hardening
+inside a shared-named crate stays hoist-eligible regardless of which app
+owns the copy; every in-path verdict is per-PR with file evidence.
 
 Verify on return: every batch report exists, every
 `pr-<number>.verdict` file exists, and the verdict count equals the
@@ -154,16 +152,16 @@ Fire both calls in the SAME turn:
 
 - `spawn_agents`, profile `finding-filer`, one finding per item (≤3),
   `maxTurns: 30`. The template requires the child to FIRST read
-  storytold/craft-libs's AGENTS.md and its extraction map (issue #94,
-  read-only — its scope policy outranks duplication) and the vendored
+  storytold/craft-libs's AGENTS.md (read-only — its scope policy
+  outranks duplication) and the vendored
   mermaid skill (.agents/skills/mermaid-diagrams/SKILL.md), then file
   the finding as an issue on ahmedhosnypro/craft-libs carrying ONE
   mermaid diagram of the extraction — VALIDATED before filing
   (bundled validator under bun when present, else the skill's
   structural checks via python3; any failure means fix-or-drop — an
-  unvalidated diagram never ships) — referencing the matching
-  upstream map entry or RFC issue by number. A new issue is
-  titled `adoption-scan: <slug>`.
+  unvalidated diagram never ships) — citing the matching upstream
+  artifact by number when one exists: a merged craft-libs PR, or an
+  open upstream issue. A new issue is titled `adoption-scan: <slug>`.
 - `spawn_agents`, profile `revsync-applier`, one candidate per item
   (≤3), `maxTurns: 40`. The template carries the target HEAD, the
   branch-name dedupe key, the scratch-clone mechanics, pin-lines-only,
@@ -203,8 +201,8 @@ signal.
   ahmedhosnypro/craft-libs (the tracking issue body and its comment
   stream are both issues writes on that repo); pin-bump branches and
   pull requests on the app repos (pin lines only). storytold/* receives
-  NO writes at all — the extraction map (storytold/craft-libs#94) and
-  its scope policy are read-only references. No comments on upstream
+  NO writes at all — storytold/craft-libs's AGENTS.md and its scope
+  policy are read-only references. No comments on upstream
   issues, ever.
 - Never print environment variables, secrets, or anything derived
   from them — that includes git config values, http headers, and

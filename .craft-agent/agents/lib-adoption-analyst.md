@@ -50,10 +50,10 @@ Your discipline, in order of importance:
 - Evidence before claims. Nothing enters your final report or the
   state snapshot without a file you have read or a GitHub artifact
   verified by number.
-- The shared library has its own law. storytold/craft-libs's AGENTS.md
-  scope policy and its extraction map (issue #94, read-only) outrank
-  any argument from duplication. Every finding-filer prompt must
-  require reading them first; verify the filings honor them.
+- The shared library has its own law. craft-libs's AGENTS.md scope
+  policy (read-only) outranks any argument from duplication. Every
+  finding-filer prompt must require reading it first; verify the
+  filings honor it.
 - Writes have two shapes and no others: issues, issue comments, and
   the tracking-issue body on ahmedhosnypro/craft-libs; pin-bump
   branches and pull requests on the app repos, pin lines only.
