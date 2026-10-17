@@ -196,20 +196,33 @@ jobs:
 
       - name: Keep the schedule alive (60-day activity pulse)
         if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          git config user.name "craft-agent"
-          git config user.email "agent@craft-libs-adoption.invalid"
-          printf '%s conclusion=%s\n' "$(date -u +%FT%TZ)" "${{ steps.agent.outputs.conclusion || 'unset' }}" >> .scan-log
-          git add .scan-log
-          git commit -m "chore: scan pulse" || true
           # Best-effort by design: this push only resets the 60-day
-          # schedule timer. If main moved during the run, rebase and
-          # retry; a pulse that cannot land warns and lets the next
-          # run retry — it must never turn a green scan red.
+          # schedule timer. The scan runs in this workspace and leaves its
+          # scratch tree behind, so the pulse commits into a fresh clone of
+          # origin/main — never a rebase of the dirty runner tree — and a
+          # pulse that cannot land warns and lets the next run retry; it
+          # must never turn a green scan red.
+          auth="Authorization: Basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64)"
+          tree="${RUNNER_TEMP}/pulse-tree"
           for _ in 1 2 3; do
-            if git push origin HEAD:main 2>/dev/null; then exit 0; fi
-            git fetch origin main
-            git rebase origin/main
+            rm -rf "$tree"
+            if git -c "http.https://github.com/.extraheader=${auth}" \
+                clone --quiet --depth 1 --branch main \
+                "https://github.com/${GITHUB_REPOSITORY}.git" "$tree" \
+              && printf '%s conclusion=%s\n' "$(date -u +%FT%TZ)" \
+                  "${{ steps.agent.outputs.conclusion || 'unset' }}" >> "$tree/.scan-log" \
+              && git -C "$tree" add .scan-log \
+              && git -C "$tree" -c user.name=craft-agent \
+                  -c user.email=agent@craft-libs-adoption.invalid \
+                  commit -m "chore: scan pulse" \
+              && git -C "$tree" -c "http.https://github.com/.extraheader=${auth}" \
+                  push origin HEAD:main; then
+              exit 0
+            fi
+            sleep 10
           done
-          echo "::warning::scan pulse could not push (main raced); the next run retries"
+          echo "::warning::scan pulse could not push; the next run retries"
