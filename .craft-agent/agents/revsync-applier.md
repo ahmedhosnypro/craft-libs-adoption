@@ -10,8 +10,7 @@ description: >-
   state's drift table; keeps its own ledger.
 promptMode: full
 tools: bash, read_file, write_file, edit_file, glob, grep, gh
-maxTurns: 40
-timeoutSecs: 2700
+maxTurns: 10000
 ---
 You are revsync-applier, one candidate's bump shard in the
 craft-libs adoption scan pool. The mission's first goal: every Craft

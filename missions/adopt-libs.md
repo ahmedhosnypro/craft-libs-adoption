@@ -42,14 +42,23 @@ from MANY SMALL children, not from children doing serial work:
 - Per-item work never loops inside one agent. A batch child with more
   than one PR spawns ONE grandchild per PR in a single spawn_agents
   call and only aggregates; a one-PR batch is classified directly.
-  Batch children spend 4 turns (claim; spawn; verify+report; close);
-  grandchildren at most 3 (fetch+ledger; verdict; spare).
-- Single-deliverable children (filer, applier, rollup) keep their
-  phase budgets — they own ONE deliverable, never a per-item loop.
-- Token budget is effectively unbounded (5,000,000,000 run budget;
-  children inherit unlimited slices) — never pass `maxTokens` on any
-  spawn call. Pass explicit `maxTurns` on every spawn call (turns, not
-  tokens, are the loop-safety bound).
+  Turn SHAPES are guidance, not caps: a batch child's four moves
+  (claim; spawn; verify+report; close) and a grandchild's three
+  (fetch+ledger; verdict; spare) describe the fastest honest path —
+  take as many turns as the work needs.
+- Single-deliverable children (filer, applier, rollup) own ONE
+  deliverable, never a per-item loop — turns are free, scope is not.
+- THE SPAWN BUDGET LAW — pass all three on EVERY spawn call:
+  `maxTurns: 10000` (the tool ceiling; effectively unbounded — the
+  stationarity guard, not turn counts, is the loop-safety bound),
+  `timeoutSecs: 0` (no wall-clock cap; children work freely until
+  done), and `maxTokens: 75000000` per member. Never OMIT maxTokens:
+  the default slice divides the remaining run budget across the batch
+  and each call commits it all, so concurrent waves starve later
+  children to ~10k-token slices that die with `budget` exits. Never
+  pass a small maxTokens either — 75,000,000 tokens is far beyond any
+  child's real need while 64 concurrent children still fit inside the
+  5,000,000,000 run budget.
 - Exactly one grandchild level (depth 3): a grandchild never spawns.
 
 ## The pool envelope (plan inside it)
@@ -110,7 +119,8 @@ every batch build one item of the form:
 
 ONE `spawn_agents` CALL carries ALL batches: the `items` array is the
 list of batches, one item per batch (`batch-<NN>|<owner/repo>#<number>;
-<title>;<merged-at>|...`), profile `merge-classifier`, `maxTurns: 6`.
+<title>;<merged-at>|...`), profile `merge-classifier`, per member
+`maxTurns: 10000`, `timeoutSecs: 0`, `maxTokens: 75000000`.
 The tool law is absolute — 2..=32 items per call, so a window of 1-32
 batches is exactly one call; more than 32 batches splits into multiple
 calls of 2..=32 items each, ALL in the same turn. A rejected call
@@ -124,7 +134,8 @@ over its PRs:
 turn 1 claims its ledger and splits the batch into per-PR grandchild
 prompts (repo, number, title, merged-at, that repo's watch-paths, and
 the verdict contract inline); turn 2 fires ONE spawn_agents call —
-one item per PR, same profile, `maxTurns: 3` per grandchild — while a
+one item per PR, same profile, `maxTurns: 10000`,
+`timeoutSecs: 0`, `maxTokens: 75000000` per grandchild — while a
 one-PR batch is classified directly instead; turn 3 verifies the
 verdict files and writes the batch report; turn 4 closes.
 
@@ -175,7 +186,8 @@ Fire both calls in the SAME turn:
   entries, got 1"). A rejected call means fix the call shape; never
   respond by spawning one call per item.
 - `spawn_agents`, profile `finding-filer`, one finding per item (≤3),
-  `maxTurns: 30`. The template requires the child to FIRST read
+  `maxTurns: 10000`, `timeoutSecs: 0`, `maxTokens: 75000000`. The template
+  requires the child to FIRST read
   storytold/craft-libs's AGENTS.md (read-only — its scope policy
   outranks duplication) and the vendored
   mermaid skill (.agents/skills/mermaid-diagrams/SKILL.md), then file
@@ -187,7 +199,8 @@ Fire both calls in the SAME turn:
   artifact by number when one exists: a merged craft-libs PR, or an
   open upstream issue. A new issue is titled `adoption-scan: <slug>`.
 - `spawn_agents`, profile `revsync-applier`, one candidate per item
-  (≤3), `maxTurns: 40`. The template carries the target HEAD, the
+  (≤3), `maxTurns: 10000`, `timeoutSecs: 0`, `maxTokens: 75000000`. The
+  template carries the target HEAD, the
   branch-name dedupe key, the scratch-clone mechanics, pin-lines-only,
   and the law: any denial (write gate, 403, protected branch) is
   recorded as a blocker — never a crash, never a retry. Applier
@@ -199,7 +212,8 @@ children claim, by number. An unverifiable claim fails the phase.
 
 ## Phase 4 — Deliver: one spawn_agent call
 
-Profile `rollup-writer`, `maxTurns: 25`. The prompt carries the state
+Profile `rollup-writer`, `maxTurns: 10000`, `timeoutSecs: 0`,
+`maxTokens: 75000000`. The prompt carries the state
 snapshot you composed: the previous Mission State body, this window's
 drift rows (from applier outcomes), maturing candidates and their
 corroboration counts, every verified artifact by number, deferred

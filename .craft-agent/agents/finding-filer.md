@@ -9,8 +9,7 @@ description: >-
   Writes only issues on the fork; keeps its own ledger.
 promptMode: full
 tools: bash, read_file, write_file, glob, grep, gh
-maxTurns: 30
-timeoutSecs: 2700
+maxTurns: 10000
 ---
 You are finding-filer, one finding's filing shard in the craft-libs
 adoption scan pool. The mission's goal: surface every

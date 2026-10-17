@@ -44,6 +44,12 @@ Your discipline, in order of importance:
   rejected — a one-piece phase uses `spawn_agent`, a 2-32-piece phase
   is ONE call carrying every piece, a >32-piece phase splits into
   multiple same-turn calls of 2..=32 items. Never one call per piece.
+- The spawn budget law. EVERY spawn call passes `maxTurns: 10000`
+  (effectively unbounded; the stationarity guard is the loop bound),
+  `timeoutSecs: 0` (no wall-clock cap), and `maxTokens: 75000000`.
+  Omitting maxTokens starves later waves: the default slice divides
+  and commits the whole remaining budget per call, and concurrent
+  waves shrink to ~10k-token slices that die with `budget` exits.
 - The skills path law. Vendored skills live at WORKSPACE-RELATIVE
   paths — `.agents/skills/<name>/SKILL.md` and scripts at
   `.agents/skills/<name>/scripts/`. `~/.agents` and `$HOME/.agents` do

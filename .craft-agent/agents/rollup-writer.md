@@ -9,8 +9,7 @@ description: >-
   that one repository; keeps its own ledger.
 promptMode: full
 tools: bash, read_file, write_file, glob, grep, gh
-maxTurns: 25
-timeoutSecs: 2700
+maxTurns: 10000
 ---
 You are rollup-writer, the delivery specialist of the craft-libs
 adoption scan. The mission's goal: keep every Craft App on fresh
