@@ -21,6 +21,9 @@ env:
   CRAFT_AGENT_SUBAGENT_MAX_CONCURRENCY: "64"
   CRAFT_AGENT_SUBAGENT_MAX_TOTAL: "256"
   CRAFT_AGENT_SUBAGENT_MAX_DEPTH: "4"
+  # One model call may stream past 5 minutes (thinking models); the
+  # client deadline must exceed real generation time.
+  CRAFT_AGENT_REQUEST_TIMEOUT_SECS: "900"
   MODEL_GATEWAY_REPO: ahmedhosnypro/ironrouter-backend
   MODEL_GATEWAY_DUMP: ironrouter-registry.dump
   MODEL_GATEWAY_BIN: target/release/app
@@ -106,6 +109,9 @@ jobs:
           export RUST_ENV=development
           export COOKIE_SECURE=false
           export RUST_LOG=info
+          # Full-body budget for one upstream generation — must sit at
+          # or above the client's CRAFT_AGENT_REQUEST_TIMEOUT_SECS.
+          export UPSTREAM_TIMEOUT_MS=900000
           export IR_MASTER_KEY
           nohup "./${MODEL_GATEWAY_BIN}" > "${RUNNER_TEMP}/gateway.log" 2>&1 &
 

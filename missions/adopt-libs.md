@@ -28,25 +28,29 @@ Wall time is dominated by per-turn model latency; parallelism comes
 from MANY SMALL children, not from children doing serial work:
 
 - You collect the whole window yourself in one REST sweep — two
-  orchestrator turns at most. Children never collect.
+  orchestrator turns at most. Children never collect the window.
 - Shard raw PRs into batches of at most 18; one classifier child per
   batch, ALL batches fired in one turn (multiple spawn_agents calls
   when a window exceeds 32 batches — same turn, never sequential).
-- Every child is exactly 3 working turns: turn 1 fuses ledger claim +
-  its one fetch loop; turn 2 writes its single report; turn 3 closes
-  its ledger.
+- Per-item work never loops inside one agent. A batch child with more
+  than one PR spawns ONE grandchild per PR in a single spawn_agents
+  call and only aggregates; a one-PR batch is classified directly.
+  Batch children spend 4 turns (claim; spawn; verify+report; close);
+  grandchildren at most 3 (fetch+ledger; verdict; spare).
+- Single-deliverable children (filer, applier, rollup) keep their
+  phase budgets — they own ONE deliverable, never a per-item loop.
 - Token budget is effectively unbounded (5,000,000,000 run budget;
   children inherit unlimited slices) — never pass `maxTokens` on any
   spawn call. Pass explicit `maxTurns` on every spawn call (turns, not
   tokens, are the loop-safety bound).
-- No grandchild levels. If a window is huge, add batches, not depth.
+- Exactly one grandchild level (depth 3): a grandchild never spawns.
 
 ## The pool envelope (plan inside it)
 
 - Concurrency: at most 64 subagents at once, tree-wide. Batch: 2-32
   items per spawn_agents call, prompts ≤ 64 KiB each.
 - Total: at most 256 subagents per run. Depth: at most 4; this design
-  uses 2 and must not go deeper.
+  uses 3 and must not go deeper.
 - Every agent follows the vendored pooled-missions skill
   (.agents/skills/pooled-missions/SKILL.md): own ledger at the path
   the prompt names, claim/done transitions, park-never-delete.
@@ -55,7 +59,7 @@ from MANY SMALL children, not from children doing serial work:
 
 | agent | one child handles | own ledger |
 |---|---|---|
-| merge-classifier | ONE batch of ≤18 window PRs across any repos | run-ledger/classifier/batch-<NN>/ |
+| merge-classifier | ONE batch of ≤18 window PRs — coordinator spawning one per-PR grandchild (direct when the batch is one PR) | run-ledger/classifier/batch-<NN>/ |
 | finding-filer | ONE finding (issue on the fork, map-aligned) | run-ledger/filer/<slug>/ |
 | revsync-applier | ONE bump candidate (clone, branch, PR) | run-ledger/revsync/<slug>/ |
 | rollup-writer | the window comment + the Mission State body | run-ledger/rollup/ |
@@ -98,8 +102,23 @@ every batch build one item of the form:
 `batch-<NN>|<owner/repo>#<number>;<title>;<merged-at>|...`
 
 Spawn ALL batches in ONE turn — profile `merge-classifier`,
-`maxTurns: 8` per member. Each child spends exactly three working
-turns (ledger claim + one fetch loop; verdict table; scope close).
+`maxTurns: 6` per member. A batch child never loops over its PRs:
+turn 1 claims its ledger and splits the batch into per-PR grandchild
+prompts (repo, number, title, merged-at, that repo's watch-paths, and
+the verdict contract inline); turn 2 fires ONE spawn_agents call —
+one item per PR, same profile, `maxTurns: 3` per grandchild — while a
+one-PR batch is classified directly instead; turn 3 verifies the
+verdict files and writes the batch report; turn 4 closes.
+
+Each grandchild handles exactly ONE PR: turn 1 fetches that PR's file
+list (a single `gh api` GET — the only fetch it makes) and records its
+verdict as a task row on the batch ledger; turn 2 writes
+`run-ledger/classifier/batch-<NN>/pr-<number>.verdict` — one line,
+`<class> | <repo>#<number> | <one-line reason> | <files evidence>` —
+and returns the same line as its final message. A third turn exists
+only to retry a failed fetch or write; the gap goes into the verdict
+file, never silence. A grandchild never spawns and never touches
+another PR.
 
 Classification rules: inside its repo's watch-paths, judge the fetched
 file lists (`rev-sync` — a craft-libs pin bump, record old/new rev;
@@ -119,9 +138,9 @@ crate. Generic hardening inside a shared-named crate stays hoist-
 eligible regardless of which app owns the copy; every in-path verdict
 is per-PR with file evidence.
 
-Verify on return: every batch report exists and its verdict count
-equals its batch size; spot-check two PRs' verdicts against their real
-file lists.
+Verify on return: every batch report exists, every
+`pr-<number>.verdict` file exists, and the verdict count equals the
+batch size; spot-check two verdicts against their real file lists.
 
 ## Phase 3 — File findings: two spawn_agents calls in ONE turn
 
@@ -200,8 +219,9 @@ signal.
   data, its output contract, its ledger path, its caps, and the rules
   it must obey — no references to "the mission" or "as discussed". A
   child that returns without its deliverable is re-spawned ONCE with
-  a narrowed prompt; after a second failure the gap becomes an
-  exception in the window comment. Never redo a completed child's
+  a narrowed prompt, keeping the ORIGINAL caps (maxTurns, timeouts) —
+  retries never shrink them; after a second failure the gap becomes
+  an exception in the window comment. Never redo a completed child's
   work yourself.
 - Stop rule: if the window comment and state body are not drafted by
   turn 180, deliver from what exists and end.
