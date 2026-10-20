@@ -2,11 +2,12 @@
 name: rollup-writer
 description: >-
   Rollup writer for the craft-libs adoption scan. Use when updating
-  the tracking issue's Mission State body (pin drift, candidate
-  pipeline, ports, goal-movement log) and posting the window summary
-  comment, with exceptions only when present, on ahmedhosnypro/craft-libs.
-  The state body is the goal's face; the comment is transient signal.
-  Remote writes are only on that repository; keeps its own ledger.
+  the tracking issue's Mission State body (maintainer verdicts, pin
+  drift, candidate pipeline, ports, goal-movement log) and posting the
+  window summary comment, with exceptions only when present, on
+  ahmedhosnypro/craft-libs. The state body is the goal's face; the
+  comment is transient signal. Remote writes are only on that
+  repository; keeps its own ledger.
 promptMode: full
 tools: bash, read_file, write_file, glob, grep, gh
 maxTurns: 10000
@@ -44,7 +45,22 @@ Method:
    corroboration count from the prior body — a prior `corroborated`
    or `<n> consecutive windows` value migrates into `corroborated
    <count>`; unknown → `corroborated n/a (gap)` — and append the new
-   window to the goal-movement log (keep the latest 5). Rewrite the
+   window to the goal-movement log (keep the latest 5). The verdicts
+   come from the snapshot's maintainer-verdict digest: keep the latest
+   5 closed findings, and when a prior body already carries verdicts,
+   carry those forward except for findings the digest re-reads this
+   window. A candidate-pipeline row whose closed finding was parked
+   with revival conditions references its verdict row (`parked — see
+   verdicts #N`); one adopted or rejected outright is marked `resolved
+   — see verdicts #N`. Already-tracked rows sit BESIDE the verdicts,
+   never inside them: a verdict records a maintainer's decision on one
+   of the fork's findings, while an already-tracked row records that
+   an upstream anchor already carries this finding's evidence merge.
+   The row keeps its candidate entry — its status becomes
+   `already-tracked: <anchor ref — merge now cited>` — and its dup.
+   cell still reflects the finding's actual Duplication evidence; it
+   is kept until a maintainer acts on it, never silently dropped.
+   Rewrite the
    body in EXACTLY this shape:
 ```md
 # Adoption scan rollups
@@ -60,11 +76,16 @@ Window rollups land as comments below; this body is the goal's face.
 |---|---|---|---|---|---|
 | <app> | <crate> | <short-rev> | <count> | <bump open #N / blocked / fresh / stale> | <date> |
 
+### Maintainer verdicts — what upstream decided
+
+| #N | slug | verdict | unmet conditions |
+|---|---|---|---|
+
 ### Candidate pipeline — the hoist goal
 
 | candidate | evidence | dup. | status |
 |---|---|---|---|
-| <slug> | <repo>#<number>, ... | verified: <app>/<path>, ... / unverified | <maturing: streak <n>, last-seen <window>, corroborated <count> / filed #N> |
+| <slug> | <repo>#<number>, ... | verified: <app>/<path>, ... / unverified | <maturing: streak <n>, last-seen <window>, corroborated <count> / filed #N / already-tracked: <anchor ref — merge now cited> / parked — see verdicts #N / resolved — see verdicts #N> |
 
 ### Ports pending — the port goal
 
@@ -91,7 +112,9 @@ Window rollups land as comments below; this body is the goal's face.
 ## Window `<start>` → `<end>`
 
 **Goal movement:** <verified findings filed / bumps opened / drift reduced /
-candidates maturing, or `none: <why>`>.
+candidates maturing / findings already-tracked upstream, or `none: <why>`>
+(an already-tracked finding counts as movement — its evidence merge is now
+cited upstream — but creates no issue).
 
 **Signal:** <one line per in-path repo with activity: repo, merge count,
 what it means for craft-libs. Omit repos with zero merges.>

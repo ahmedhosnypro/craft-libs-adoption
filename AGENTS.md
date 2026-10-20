@@ -17,6 +17,7 @@ This repository automates a scan of the Craft Apps suite every six hours for mer
 | `scripts/clone-sources.sh` | One clone attempt for the source sweep (sparse/full/tarball methods); called by source-cloner children |
 | `sources/`, `run-ledger/` | Workspace scratch: per-window clone attempts for scanned repos and `storytold/craft-libs` (scope truth), plus agent ledgers. Clone outcomes must be recorded; scratch is never committed. |
 | `rollups/` | Legacy rollup documents from the proposal-PR era; the scan now comments on the tracking issue and updates its state body on `ahmedhosnypro/craft-libs` |
+| `docs/workflow-diagrams.md` | Mermaid visualizations of how the scan runs (CI job, mission phases, subagent pool, verdict lifecycle, filer gates) — kept in sync with the workflow, see "Keeping the workflow diagrams current" below |
 
 ## Running a scan
 
@@ -40,3 +41,7 @@ Watch with `gh run watch`. Sources are not pre-cloned: the window is collected t
 ## Changing the scan list
 
 Edit `config/repo-list.txt` (archetype, watch-paths, and candidate hypotheses per repo). This file is the source of truth; when the list changes, update any explicit repo counts elsewhere in the mission or documentation.
+
+## Keeping the workflow diagrams current
+
+`docs/workflow-diagrams.md` documents how the scan runs: the CI job, the mission phases, the subagent tree, the classification wave, the verdict lifecycle, the filer gates, the cadence, and the subagent budget. Whenever any of those change — `.github/workflows/adopt-libs.yml` (steps, triggers, env), `missions/adopt-libs.md` (phases, caps, rules), `.craft-agent/agents/` (the team or its ledgers), or `scripts/` — update the diagrams in the same change. Diagram elements must keep naming the real file, step, phase, agent, or artifact, and every diagram must pass the bundled validator (`bun .agents/skills/mermaid-diagrams/scripts/validate-mermaid.ts docs/workflow-diagrams.md`) before the change is called done.

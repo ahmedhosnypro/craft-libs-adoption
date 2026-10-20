@@ -80,9 +80,19 @@ from children doing serial work:
    heals a missed slot.
 
 2. Read `config/repo-list.txt`, the pooled-missions skill, and the tracking issue's CURRENT Mission
-   State body (drift table, candidate pipeline, ports, goal-movement log) — it is the run's starting
-   state. If no tracking issue exists yet, record that gap and give rollup-writer an empty prior
+   State body (maintainer verdicts, drift table, candidate pipeline, ports, goal-movement log) — it is
+   the run's starting state. If no tracking issue exists yet, record that gap and give rollup-writer an empty prior
    state to initialize. Init your ledger: `run-ledger/orchestrator/mission.db`.
+   During that state read, build the MAINTAINER-VERDICT DIGEST — without it a candidate closed with
+   revival conditions gets re-filed every window. List the closed findings:
+   `gh issue list --repo ahmedhosnypro/craft-libs --state closed --search 'adoption-scan in:title'
+   --json number,title,closedAt`, then fetch each issue's comments
+   (`gh api repos/ahmedhosnypro/craft-libs/issues/<number>/comments`) and take the LATEST comment
+   created before that issue's `closedAt` carrying a Verdict or Resolution heading — no author
+   check, only the maintainer writes those; none found → `closed without recorded verdict`. One
+   digest line per finding: number, slug (its `adoption-scan: <slug>` title), verdict, and unmet
+   conditions. The digest drives Phase 3's parked-candidate exemption and flows into the Phase 4
+   state snapshot.
 
 3. Collect, clone, shard, spawn, verify, rank, deliver — the phases below.
 
@@ -111,7 +121,9 @@ for scope-truth). If the list grows beyond 32 items, split into calls of 2–32 
 no call has one item; run sequential waves if the combined active calls would exceed 64 children.
 Each member receives `maxTurns: 10000`, `timeoutSecs: 0`, and `maxTokens: 75000000`. Item shape:
 `<owner/repo>|<watch-paths csv>|<purpose>` where purpose is `scan-source`, or `scope-truth` for
-craft-libs (its watch-paths are `AGENTS.md,crates,docs,licenses`). Each child clones into
+craft-libs (its watch-paths are `AGENTS.md,Cargo.toml,crates,docs,licenses` — the root `Cargo.toml`
+carries the real `[workspace.dependencies]` `craft-` list that the filer's crate-name gate reads;
+without it the gate falls back to the contents API). Each child clones into
 `sources/<repo-slug>/` — the repo basename from `<owner/repo>` (logged with its owner),
 workspace-relative and refreshed every run; `storytold/craft-libs` maps to `sources/craft-libs/`. It
 verifies the watch-paths are really populated, and retries through a bounded ladder (sparse → full →
@@ -197,6 +209,21 @@ count in the candidate pipeline's status cell (`maturing: streak <n>, last-seen 
 corroborated <count>`). Keep over-cap items in the state snapshot as deferred, never as
 filed.
 
+THE SPLIT RULE: a hoist cluster spanning multiple format families composes ONE filer item per
+family/role — each with its own slug, crate name, boundary sketch and evidence slice — and no filer
+is ever handed an unsplit multi-family payload (if one is, it refuses `bad-crate-shape`). Split
+items count against the existing ≤3 findings cap; over-cap splits stay deferred in the state body
+per the existing rule. The cap does not grow.
+
+THE PARKED-CANDIDATE EXEMPTION: before promoting, read the run-start maintainer-verdict digest
+(step 2), slug-joined — a candidate's pipeline slug equals the closed finding's
+`adoption-scan: <slug>` title. A candidate whose closed finding was parked with revival conditions
+is NOT re-filed unless a named condition is demonstrably met this window, and then the promotion
+cites which condition. A candidate adopted or rejected outright is marked resolved in the pipeline,
+never re-filed. `already-filed` still ends a re-file, and its new evidence is not lost: record the
+corroborating merges in the candidate's pipeline row via the state snapshot — new evidence reaches
+the issue through the human, not through new write shapes.
+
 Fire the calls in the SAME turn:
 
 - Tool shape: one call per profile, and its `items` array must carry 2..=32 entries. A phase with
@@ -206,22 +233,47 @@ Fire the calls in the SAME turn:
   one call per item.
 
 - `spawn_agents`, profile `finding-filer`, one finding per item (≤3), `maxTurns: 10000`,
-  `timeoutSecs: 0`, `maxTokens: 75000000`. Each item also carries that finding's per-repo clone
+  `timeoutSecs: 0`, `maxTokens: 75000000`. Each item ALSO carries that finding's shard contents: the
+  proposed crate name (`craft-<name>` for a hoist; the existing craft-libs crate for a port), a
+  boundary sketch (one line per returns / apps keep / not in scope), and any known upstream anchor
+  numbers (from the pipeline row or the verdict digest lines). The filer VERIFIES these against the
+  clones and the live API — it never invents them; the self-contained-prompt law is preserved. Each
+  item also carries that finding's per-repo clone
   outcome lines from Phase 1b (`clone-ok` / `clone-degraded` / `clone-blocked`), so the filer can
   prove or mark each consumer without guessing. The template requires the child to FIRST read craft-libs'
-  real tree — the scope-truth clone at `sources/craft-libs/` (AGENTS.md, crates/, docs/ — read-only,
-  its scope policy outranks duplication). If that clone or policy is unavailable, defer filing and
-  report an exception; do not guess scope. Then read the vendored mermaid skill
-  (.agents/skills/mermaid-diagrams/SKILL.md), then verify duplication against the clones (per
+  real tree — the scope-truth clone at `sources/craft-libs/` (AGENTS.md, crates/, Cargo.toml, docs/ —
+  read-only, its scope policy outranks duplication). If that clone or policy is unavailable, defer
+  filing and report an exception; do not guess scope. Then read the vendored mermaid skill
+  (.agents/skills/mermaid-diagrams/SKILL.md), then gate the crate shape — the name identifies ONE
+  format family or ONE role; a bucket name (`import`, `io`, `doc`, `core`, `util`, `common`,
+  `misc`) or a multi-family payload is `bad-crate-shape`, and a name already carried by
+  `sources/craft-libs/crates/` or the root Cargo.toml reframes the finding as an extension of that
+  crate — then write the Boundary section (returns / apps keep / not in scope; a payload needing a
+  renderer or an editor document model to be useful is `policy-rejected`), then verify duplication
+  against the clones (per
   claimed consumer, a real `sources/<app>/<path>` plus a PR or pin ref; a repo with no populated
   clone is `unverified`, never asserted), check the collision question (does craft-libs already
-  cover this surface?), gate any non-source asset move on the licensing precondition, then file the
+  cover this surface?), gate any non-source asset move on the licensing precondition, then resolve
+  the anchors and file the
   finding as an issue on ahmedhosnypro/craft-libs carrying its ONE mermaid diagram of the extraction
   — VALIDATED before filing (bundled validator under bun when present, else the skill's structural
   checks via python3; an unvalidated diagram never ships: a hoist carries exactly one or does not
-  file at all, and a port's optional diagram is dropped on failure with the omission noted) — citing
-  the matching upstream artifact by number when one exists: a merged craft-libs PR, or an open
-  upstream issue. A new issue is titled `adoption-scan: <slug>`; if one with that exact title
+  file at all, and a port's optional diagram is dropped on failure with the omission noted) — with a
+  required **Anchors** section: every anchor candidate resolved live (`gh issue view` /
+  `gh pr view` on storytold/craft-libs) and recorded as number + title + state. The PRIMARY anchor
+  is a merged craft-libs PR or an open upstream issue covering this surface; a closed artifact is a
+  secondary citation labeled `closed` and is never the primary; with no dedicated anchor the body
+  says `no dedicated upstream RFC` and names the closest open ones. Then run the two anchor checks on
+  the resolved primary anchor, live and read-only (`gh api repos/storytold/craft-libs/issues/<n>
+  --jq .body` plus its `comments --paginate --jq '.[].body'` — read BOTH halves; the boundary
+  wording may live in either): the anchor's boundary wording outranks the proposed crate name, so on
+  conflict the filer retargets the proposal and the Anchors section names the conflict (`<source
+  directory name> → <anchor name>`), and a change genuinely spanning both sides of the boundary is
+  refused `bad-crate-shape` and goes back to the split rule above rather than into one issue; and
+  when the anchor's entry already cites one of the finding's evidence merges the outcome is
+  `already-tracked <slug> <anchor ref>` — no issue created, the finding recorded for the state body
+  — the trigger being the citation of the merge, never surface coverage alone. A new issue is titled
+  `adoption-scan: <slug>`; if one with that exact title
   already exists, the filer verifies it and returns `already-filed` — no second issue, no comment.
 
 - `spawn_agents`, profile `revsync-applier`, one candidate per item (≤3), `maxTurns: 10000`,
@@ -234,19 +286,25 @@ behind-HEAD count,
   opened/blocked) feed the drift table verbatim.
 
 Verify against reality: `gh api` every issue, comment, and PR the children claim, by number. An
-unverifiable claim fails the phase.
+unverifiable claim fails the phase. An `already-tracked` outcome is verified the same way:
+re-resolve the cited anchor live (`gh api repos/storytold/craft-libs/issues/<n>` plus its
+`comments --paginate`) and grep the quoted line from BOTH the body and the comments — a materialized
+map file is never the check; anchor reads are live, per finding, read-only. A citation the anchor
+does not carry fails the phase like any other unverifiable claim.
 
 ## Phase 4 — Deliver: one spawn_agent call
 
 Profile `rollup-writer`, `maxTurns: 10000`, `timeoutSecs: 0`, `maxTokens: 75000000`. The prompt
 carries the state snapshot you composed: the previous Mission State body, this window's drift rows
 (from applier outcomes), maturing candidates with window IDs, last-seen window, consecutive-window
-streak and corroboration counts, every verified artifact by number, deferred findings, and
+streak and corroboration counts, every verified artifact by number, `already-tracked` findings with
+their anchor refs, deferred findings, the
+maintainer-verdict digest, and
 exceptions. The child produces TWO artifacts on ahmedhosnypro/craft-libs, per its profile templates:
 
-1. The updated **Mission State body** on the tracking issue `Adoption scan rollups` — pin-drift
-   table, candidate pipeline, ports pending, goal-movement log (last 5 windows), carry-forward rules
-   per its profile.
+1. The updated **Mission State body** on the tracking issue `Adoption scan rollups` — maintainer
+   verdicts (latest 5), pin-drift table, candidate pipeline, ports pending, goal-movement log (last 5
+   windows), carry-forward rules per its profile.
 
 2. The **window comment** — terse: goal movement, signal, exceptions. Three to eight lines, plus
    one Signal line per active repo; an empty window is three lines.

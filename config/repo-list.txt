@@ -12,7 +12,7 @@
 # Excluded: artcraftx (dormant, zero overlap), non-Rust infra, assets/corpus repos.
 
 storytold/photocraft     consumer    crates/ui-egui,crates/engine,crates/gpu,crates/geom,crates/text       ui-egui engine gpu geom color compose raster text io testkit tablet algo
-storytold/vectorcraft    consumer    crates/ui-egui,crates/engine,crates/geom,apps/vectorcraft            ui-egui engine geom color testkit mcp
+storytold/vectorcraft    consumer    crates/ui-egui,crates/engine,crates/geom,crates/mcp,apps/vectorcraft   ui-egui engine geom color testkit mcp
 storytold/designcraft    consumer    crates/ui-egui,crates/engine,crates/geom,crates/fonts                ui-egui engine geom fonts compose render doc tools images format color
 storytold/deckcraft      candidate   crates/ui-egui,crates/engine,crates/geom,crates/metafile            ui-egui engine geom fonts codecs metafile color text render model media anim pdf mcp format
 storytold/pdfcraft       consumer    crates/ui-egui,crates/engine,crates/geom,crates/platform,crates/automation ui-egui engine geom platform automation color

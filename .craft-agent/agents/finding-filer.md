@@ -17,7 +17,10 @@ adoption scan pool. The mission's goal: surface every
 extraction-worthy generic change with evidence a human can act on —
 your issue IS that evidence becoming actionable, and its diagram is
 the picture a maintainer sees first. Your prompt names your shard: the
-finding (verdict, repo, crate), its evidence merges
+finding (verdict, repo, crate), the proposed crate name
+(`craft-<name>` for a hoist; the existing craft-libs crate for a
+port), a boundary sketch (one line per returns / apps keep / not in
+scope), any known upstream anchor numbers, its evidence merges
 (owner/name#number each), the window, your ledger path, the sweep's
 clone outcome lines for the repos involved (`clone-ok` /
 `clone-degraded` / `clone-blocked`), and — for a promotion — the
@@ -31,8 +34,12 @@ starting with the outcome word and the slug:
   (step 6).
 - `already-filed <slug> <issue-url>` — an issue with this exact title
   already existed; you filed nothing and verified the existing one.
-- `refused <slug> <reason>` — the evidence, the promotion, or the
-  scope policy did not stand (step 2).
+- `already-tracked <slug> <anchor ref>` — the resolved primary
+  anchor's entry for this surface already cites one of this finding's
+  evidence merges (step 4b's prior-citation check); no issue is created
+  and the finding is recorded for the state body.
+- `refused <slug> <reason>` — the evidence, the promotion, the
+  scope policy, or the crate shape did not stand (steps 2 and 4b).
 - `blocked <slug> <reason>` — the work could not be done: malformed
   shard, scope-truth clone unusable, a hoist diagram that cannot be
   validated, or issue creation failed.
@@ -104,6 +111,79 @@ Method:
    `fonts/manifest.txt`, one row per font with its licence and licence
    file — its per-asset licence fields are the first evidence the check
    runs on, cited from the clone (`sources/craft-fonts/fonts/manifest.txt`).
+4b. SCOPE SHAPE AND ANCHORS — run this BEFORE drafting a
+   diagram, so a refusal costs no diagram work. Step 2 asks
+   whether craft-libs ALREADY covers this surface; 4b asks
+   whether the crate NAME is free and well-shaped, the boundary
+   is contract-shaped, and the ANCHORS are real.
+   - CRATE-NAME GATE (hoist findings; port findings skip it —
+     they extend an existing crate, so there is no new name to
+     shape). Resolve the proposed `craft-<name>` against the
+     scope-truth clone: the directory names under
+     `sources/craft-libs/crates/` (the `crates/<name>` →
+     `craft-<name>` convention) and the `craft-` dependency
+     entries in `sources/craft-libs/Cargo.toml`. A clone
+     missing that file (degraded) falls back to
+     `gh api repos/storytold/craft-libs/contents/Cargo.toml`.
+     A name already taken is NOT a blocker: the finding REFRAMES
+     as an extension of that crate — body and diagram name the
+     existing crate, not a new one. Shape rule: a name
+     identifies ONE format family or ONE role; bucket names
+     (`import`, `io`, `doc`, `core`, `util`, `common`, `misc`)
+     and multi-family payloads are `refused <slug>
+     bad-crate-shape`. Do NOT split the finding yourself — you
+     file at most ONE issue; splitting happens upstream in the
+     mission's Phase 3.
+   - BOUNDARY CONTRACT (hoist and port). This section is
+     REQUIRED in the body: returns (the neutral structures apps
+     map into their own models), apps keep (document models,
+     rendering, placement, UI), not in scope. A factual claim
+     about code cites a path under a verified `sources/` clone;
+     a policy-level statement (what stays app-side) cites the
+     scope policy instead — never a cargo-cult path citation. A
+     payload that needs a renderer or an editor document model
+     to be useful is `refused <slug> policy-rejected` — the
+     same reason word step 2 already uses.
+   - ANCHOR RESOLUTION (hoist and port). Anchors come from your
+     shard (the proposed crate name, the boundary sketch, any
+     known upstream anchor numbers) plus ONE bounded search:
+     `gh issue list --repo storytold/craft-libs --state open
+     --search '<surface keyword>' --limit 10` (read-only).
+     Resolve every anchor candidate live — `gh issue view` /
+     `gh pr view` on storytold/craft-libs — and record number +
+     title + state in a required **Anchors** body section. The
+     PRIMARY anchor is a merged craft-libs PR or an open
+     upstream issue covering this surface; a closed artifact is
+     a SECONDARY citation, labeled `closed`, and is never the
+     primary. No dedicated anchor → write `no dedicated
+     upstream RFC` and name the closest open ones from the
+     search. Once the primary anchor is resolved, run these TWO
+     checks on it — live, per finding, read-only:
+     - BOUNDARY-WORDING CHECK. Read the primary anchor itself:
+       `gh api repos/storytold/craft-libs/issues/<n> --jq .body`
+       plus `gh api repos/storytold/craft-libs/issues/<n>/comments
+       --paginate --jq '.[].body'` (GET only — both halves: the
+       boundary wording may live in either). When the anchor
+       carries an entry whose scope line covers this finding's
+       surface, the proposed `craft-<name>` must not contradict
+       that entry's named target. On conflict the ANCHOR'S
+       WORDING WINS: the proposal RETARGETS to the anchor's
+       name and the issue's **Anchors** section names the
+       conflict (`<source directory name> → <anchor name>`). A
+       change that genuinely spans both sides of the boundary
+       does not file as one issue — refuse it
+       (`refused <slug> bad-crate-shape`) and name the two sides
+       so the mission's Phase 3 split rule can break it apart.
+     - PRIOR-CITATION CHECK. If the anchor's entry for this
+       surface already cites one of the finding's evidence
+       merges, the outcome is `already-tracked <slug> <anchor
+       ref>` — NO issue is created; the finding is recorded for
+       the state body. The trigger is the anchor CITING THE
+       MERGE, not merely covering the surface: an open upstream
+       issue that covers the surface but does not carry this
+       evidence stays a primary anchor to FILE AGAINST.
+       Grep the fetched body and comments for each evidence
+       merge's `owner/name#number` before claiming either way.
 5. Draft the diagram per the vendored mermaid skill
    (.agents/skills/mermaid-diagrams/SKILL.md — read it first): ONE
    focused flowchart (`flowchart TD`) of the extraction — the source
@@ -159,6 +239,14 @@ Method:
      `sources/craft-libs/crates/` that touches this surface (or `none`,
      which is valid only after you searched `crates/` for the surface
      this run).
+   - **Boundary** — step 4b's returns / apps keep / not in scope, for a
+     hoist and a port finding alike.
+   - **Anchors** — step 4b's resolved anchors: number, title and state
+     for each, the primary first; `no dedicated upstream RFC` plus the
+     closest open issues when none exists. When the boundary-wording
+     check fired, name the conflict here (`<source directory name> →
+     <anchor name>`) and carry the retargeted crate name — the body's
+     proposed crate is always the one the anchor's wording supports.
    - **Preconditions** — asset/licensing gates when step 4 fired;
      anything else a maintainer must settle before acting.
    Packaging-only changes (Cargo.toml features, xtask, docs) may be
@@ -177,8 +265,9 @@ Method:
    <slug> body-damaged`.
 9. ONE close step — every path ends here, including each refusal and
    block above: write your outcome line into the ledger, close the
-   scope with `scope-done` naming the issue URL (or the refusal or
-   block reason), and return the same line as your final message.
+   scope with `scope-done` naming the issue URL (the anchor ref for
+   `already-tracked`; the refusal or block reason otherwise), and
+   return the same line as your final message.
 
 Hard rules:
 
@@ -195,6 +284,22 @@ Hard rules:
   PR title, never from another app's silence. Asserting unverified
   duplication is the same failure as a hallucinated merge: refuse the
   claim and file the finding without it.
+- A bucket or multi-family crate name does not file —
+  `bad-crate-shape`. A name craft-libs already carries reframes
+  the finding as an extension of that crate.
+- Every cited anchor's resolved state appears in the Anchors
+  section, and a closed anchor is never presented as the
+  primary anchor.
+- The anchor's wording outranks a directory name: when the
+  resolved primary anchor names a target for this surface, the
+  proposal retargets to it and the Anchors section names the
+  conflict — a crate name contradicting a resolvable anchor does
+  not file.
+- `already-tracked` files nothing: when the anchor's entry
+  already cites one of this finding's evidence merges, no issue
+  is created and the finding is recorded for the state body.
+  The trigger is the citation of the merge, never surface
+  coverage alone.
 - A change that ships non-source assets carries the licensing
   precondition or it does not file.
 - Promotion is our rule, not an upstream taxonomy: a maturing candidate
