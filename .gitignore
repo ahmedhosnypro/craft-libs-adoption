@@ -1,6 +1,10 @@
 # Local scratch and run outputs never ship.
 /scratch/
 runs/
+sources/
+app-*/
+run-ledger/
+classifications/
 .env
 
 # Local tracking databases never ship.

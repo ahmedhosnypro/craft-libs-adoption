@@ -5,12 +5,16 @@
 #              source (shared asset/code origin; port proposals ripple outward)
 #   watch-paths: crate-level prefixes that carry adoption-relevant signal
 #   candidates: crates duplicated across the suite worth proposing
+# The `candidates` column is an unverified HYPOTHESIS — it seeds
+# watch-paths and candidate slugs. Duplication is only ever proven in
+# the Phase-1b clones under sources/ (or marked unverified in a finding);
+# this column is never citation evidence.
 # Excluded: artcraftx (dormant, zero overlap), non-Rust infra, assets/corpus repos.
 
 storytold/photocraft     consumer    crates/ui-egui,crates/engine,crates/gpu,crates/geom,crates/text       ui-egui engine gpu geom color compose raster text io testkit tablet algo
 storytold/vectorcraft    consumer    crates/ui-egui,crates/engine,crates/geom,apps/vectorcraft            ui-egui engine geom color testkit mcp
 storytold/designcraft    consumer    crates/ui-egui,crates/engine,crates/geom,crates/fonts                ui-egui engine geom fonts compose render doc tools images format color
-storytold/deckcraft      candidate   crates/ui-egui,crates/engine,crates/geom,crates/codecs,crates/metafile ui-egui engine geom fonts codecs metafile color text render model media anim pdf mcp format
+storytold/deckcraft      candidate   crates/ui-egui,crates/engine,crates/geom,crates/metafile            ui-egui engine geom fonts codecs metafile color text render model media anim pdf mcp format
 storytold/pdfcraft       consumer    crates/ui-egui,crates/engine,crates/geom,crates/platform,crates/automation ui-egui engine geom platform automation color
 storytold/filmcraft      consumer    crates/ui-egui,crates/engine,crates/gpu,crates/geom,crates/color,crates/text,crates/format,crates/testkit,crates/automation,crates/codecs ui-egui engine gpu geom color text format testkit automation codecs
 storytold/effectcraft    consumer    crates/ui-egui,crates/engine,crates/gpu,crates/geom,crates/time,crates/color,crates/project,crates/interchange,crates/keyframe,crates/path ui-egui engine gpu geom time color project interchange keyframe path
@@ -20,7 +24,7 @@ storytold/cadcraft      consumer    crates/ui-egui,crates/engine,crates/geom,cra
 storytold/wordcraft     consumer    crates/ui-egui,crates/fonts,crates/geom,crates/mcp,crates/render        ui-egui fonts geom mcp formats doc render
 storytold/soundcraft     consumer    crates/ui-egui,crates/engine,crates/automation                         ui-egui engine automation
 storytold/artcraft       candidate   crates/lib,crates/api_clients,crates/testing                            midjourney_client fal_client cookie_store cloudflare_errors cloudflare_mitigation browser_emulation filesys images mimetypes jwt_light http_headers url_utils uuid_utils test_utils
-storytold/artcraft-services candidate crates/,apps/                                              api_clients cookie_store cloudflare browser_emulation
-storytold/craft-repo-status-app candidate crates/,src/                                             status-poller
+storytold/artcraft-services candidate crates/,docs/                                            api_clients cookie_store cloudflare browser_emulation
+storytold/craft-repo-status-app candidate crates/,ui/,docs/                                        status-poller
 storytold/craft-launcher candidate   crates/ui-egui,crates/core,crates/native                            ui-egui i18n updater
-storytold/craft-fonts    source      crates/craft-fonts,crates/craft-fonts-tests,manifest.txt            fonts-loader manifest-protocol
+storytold/craft-fonts    source      crates/craft-fonts,crates/craft-fonts-tests,fonts/manifest.txt   fonts-loader manifest-protocol

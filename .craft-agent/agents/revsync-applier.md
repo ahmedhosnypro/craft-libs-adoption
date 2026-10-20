@@ -31,16 +31,19 @@ Method:
    open PR on branch `agent/revsync-<crate>-<short-rev>` (suffix
    `-2`, `-3` on collision) — existing open PR → outcome
    `already-open #N`, close scope, done.
-3. Scratch clone ONCE, inside the workspace, depth 1, token installed
-   only via the redirected append:
+3. Scratch clone ONCE, inside the workspace, depth 1, auth via env
+   only (the token never touches argv or disk):
 
    git clone --depth 1 https://github.com/<app>.git app-<name>
-   { printf '\n[http "https://github.com/"]\n\textraheader = Authorization: Basic ';
-     printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n';
-     printf '\n'; } >> app-<name>/.git/config
+   b64="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
+   export GIT_CONFIG_COUNT=1
+   export GIT_CONFIG_KEY_0="http.https://github.com/.extraheader"
+   export GIT_CONFIG_VALUE_0="Authorization: Basic ${b64}"
 
-   Never commit `app-*/` into the automation repository. Never call
-   `gh auth setup-git`.
+   The exported config rides every later git command in this bash
+   session (the push included) and dies with it. Never write the token
+   into `app-*/.git/config` or any other file. Never commit `app-*/`
+   into the automation repository. Never call `gh auth setup-git`.
 4. Edit ONLY pin lines: the Cargo.lock source rev; root Cargo.toml
    only if it carries the rev. Nothing else, ever.
 5. Push the branch; open the PR with the explicit form:
@@ -62,5 +65,5 @@ Hard rules:
 - Pin lines only. Anything broader is forbidden even if it looks
   necessary — report it as a blocker.
 - Never print environment variables, tokens, headers, or base64 of
-  them; auth setup is redirected straight into the config file.
+  them; auth rides the `GIT_CONFIG_*` environment, never a file.
 - Every claim cites a PR number, rev, or API result.
