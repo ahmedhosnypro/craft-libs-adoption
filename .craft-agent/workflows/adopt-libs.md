@@ -65,15 +65,20 @@ steps:
       step's contract:
 
       - Zero merges → skip to the final message saying so. Otherwise
-        shard rows.jsonl into per-repo batches of at most 18, ordered
+        shard rows.jsonl into per-repo batches of at most 6, ordered
         newest-first, dense numbering from batch-01; a failed batch keeps
         its number as batch-<NN>-retry and gaps are EXCEPTIONS.
-      - Capacity-safe waves: one `spawn_agents` call for 2–32 batches
+      - Capacity-grouped dispatch, ALL groups in ONE turn: group the
+        batches so every group's `sum(1 + PRs per batch) ≤ 128` (the
+        concurrency knob), then fire every group's call in the same
+        turn — one `spawn_agents` call for 2–32 batches per group
         (profile merge-classifier; every member maxTurns 10000,
-        timeoutSecs 0, maxTokens 75000000), or `spawn_agent` for one
-        batch; never one call per batch, never a one-item call. Verify a
-        wave — every coordinator and its per-PR grandchildren, with the
-        verdict files — before starting the next.
+        timeoutSecs 0, maxTokens 75000000), or `spawn_agent` for a
+        single-batch group. NO wave barrier: a finished group's verdict
+        files are verified as they land while later groups still run; a
+        failed batch re-spawns once with the next turn's calls (number
+        kept as batch-<NN>-retry, original caps). Never one call per
+        batch, never a one-item call.
       - Verdict file contract (the batch child's grandchildren write
         them): `run-ledger/classifier/batch-<NN>/pr-<number>.verdict` =
         `<class> | <repo>#<number> | <one-line reason> | <files evidence>`,
@@ -84,10 +89,11 @@ steps:
         PACKAGING RULE bind: a library share of ~zero never clears the
         hoist bar alone.
       - WAVE SIZING: this workflow's only token ceiling is its
-        max-total-tokens pool (no per-step cap exists) — size waves so
-        the concurrent children's expected usage fits inside it.
+        max-total-tokens pool (no per-step cap) — size groups so the
+        concurrent children's expected usage fits inside it under the
+        128-concurrency knob.
       - Verify on return: every batch report and verdict file exists, the
-        verdict count equals the batch size, and two verdicts per wave
+        verdict count equals the batch size, and two verdicts per group
         are spot-checked against the live file lists and patches.
 
       Final message: batch report paths, per-repo class counts,

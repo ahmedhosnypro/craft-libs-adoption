@@ -29,11 +29,7 @@ from children doing serial work:
 - You collect the whole window yourself in one REST sweep — two orchestrator turns at most. Children
   never collect the window.
 
-- Shard raw PRs into batches of at most 18. Plan classifier waves conservatively so `sum(1 + PRs per
-  batch) ≤ 64`; this counts each coordinator and its possible per-PR grandchildren. Finish and
-  verify one wave before starting the next. Within a wave use one `spawn_agents` call for 2..=32
-  batches, or `spawn_agent` for one batch; never create one-item `spawn_agents` calls. Rebalance
-  call groups so none has one item.
+- Shard raw PRs into batches of at most 6. Plan the dispatch as capacity-grouped calls fired in ONE turn so every group's `sum(1 + PRs per batch) ≤ concurrency` (128 with the scan's knob); that counts each coordinator and its possible per-PR grandchildren. Fire every group's call in the same turn — no wave barrier: verification of a finished group happens as its results land while the next group is already running. Within a group use one `spawn_agents` call for 2..=32 batches, or `spawn_agent` for one batch; never create one-item `spawn_agents` calls. Rebalance call groups so none has one item. A re-spawn for a failed batch keeps its number as `batch-<NN>-retry` and fires with the next turn's calls, never as a new wave.
 
 - Per-item work never loops inside one agent. A batch child with more than one PR spawns ONE
   grandchild per PR in a single spawn_agents call and only aggregates; a one-PR batch is classified
@@ -48,24 +44,24 @@ from children doing serial work:
   effectively unbounded — the stationarity guard, not turn counts, is the loop-safety bound),
   `timeoutSecs: 0` (no wall-clock cap; children work freely until done), and `maxTokens: 75000000`
   per member. Never OMIT maxTokens: the default slice divides the remaining run budget across the
-  batch and each call commits it all, so concurrent waves starve later children to ~10k-token slices
-  that die with `budget` exits. Never pass a small maxTokens either — 75,000,000 tokens is far
-  beyond any child's real need while 64 concurrent children still fit inside the 5,000,000,000 run
-  budget. Under the workflow (`.craft-agent/workflows/adopt-libs.md`) there is no per-step token cap,
-  so the classify dispatch law sizes its waves so expected child usage fits the run's
-  `max-total-tokens: "100000000"` pool.
+  batch and each call commits it all, so concurrent groups starve later children to ~10k-token
+  slices that die with `budget` exits. Never pass a small maxTokens either — 75,000,000 tokens is
+  far beyond any child's real need while 128 concurrent children still fit inside the
+  5,000,000,000 run budget. Under the workflow (`.craft-agent/workflows/adopt-libs.md`) there is no
+  per-step token cap, so the classify dispatch law sizes its groups against the run's
+  `max-total-tokens: "100000000"` pool and the 128-concurrency knob.
 
 - Exactly one grandchild level (depth 3): a grandchild never spawns.
 
 ## The pool envelope (plan inside it)
 
-- Concurrency: at most 64 subagents at once, tree-wide. Batch: 2-32 items per spawn_agents call,
+- Concurrency: at most 128 subagents at once, tree-wide. Batch: 2-32 items per spawn_agents call,
   prompts ≤ 64 KiB each.
 
 - Total: at most 256 subagents per run — reserve ~30 (18 cloners, ≤6 filers/appliers, rollup,
-  retries); batch children plus per-PR grandchildren must fit the rest (~210 PRs). Beyond that,
-  classify newest-first and report the unclassified count as an EXCEPTION. Depth: at most 4; this
-  design uses 3 and must not go deeper.
+  retries); batch children plus per-PR grandchildren must fit the rest (~226 PRs, ~32 batches of
+  6). Beyond that, classify newest-first and report the unclassified count as an EXCEPTION. Depth: at
+  most 4; this design uses 3 and must not go deeper.
 
 - Every agent follows the vendored pooled-missions skill (.agents/skills/pooled-missions/SKILL.md):
   own ledger at the path the prompt names, claim/done transitions, park-never-delete.
@@ -75,7 +71,7 @@ from children doing serial work:
 | agent | one child handles | own ledger |
 |---|---|---|
 | source-cloner | ONE repo's fresh clone into sources/<name>/, verified, with a bounded retry ladder | run-ledger/clone/<name>/ |
-| merge-classifier | ONE batch of ≤18 window PRs — coordinator spawning one per-PR grandchild (direct when the batch is one PR) | run-ledger/classifier/batch-<NN>/ |
+| merge-classifier | ONE batch of ≤6 window PRs — coordinator spawning one per-PR grandchild (direct when the batch is one PR) | run-ledger/classifier/batch-<NN>/ |
 | finding-filer | ONE finding (issue on the fork, scope-policy-aligned) | run-ledger/filer/<slug>/ |
 | revsync-applier | ONE bump candidate (clone, branch, PR) | run-ledger/revsync/<slug>/ |
 | rollup-writer | the window comment + the Mission State body | run-ledger/rollup/ |
@@ -125,7 +121,8 @@ phase brings the real code into the window: every scanned repo, cloned fresh —
 zero merges, because duplication is proven across the suite, not across the window. Use one
 `spawn_agents` call for the 18 current clone items (17 configured repos plus `storytold/craft-libs`
 for scope-truth). If the list grows beyond 32 items, split into calls of 2–32 items, rebalancing so
-no call has one item; run sequential waves if the combined active calls would exceed 64 children.
+no call has one item; if the combined active calls would exceed the concurrency knob, split the
+clones into sequential capacity-safe waves.
 Each member receives `maxTurns: 10000`, `timeoutSecs: 0`, and `maxTokens: 75000000`. Item shape:
 `<owner/repo>|<watch-paths csv>|<purpose>` where purpose is `scan-source`, or `scope-truth` for
 craft-libs (its watch-paths are `AGENTS.md,Cargo.toml,crates,docs,licenses` — the root `Cargo.toml`
@@ -149,9 +146,9 @@ only. The sweep's outcomes set the run's verification floor:
 - `clone-degraded` / `clone-blocked` repos are EXCEPTIONS in the window comment, never silent, and
   never a reason to stop the run.
 
-## Phase 2 — Classify: shard raw PRs into capacity-safe waves
+## Phase 2 — Classify: shard raw PRs into capacity-grouped dispatch
 
-Zero merges: skip to Phase 3. Otherwise build batches of at most 18 merges each, keeping every batch
+Zero merges: skip to Phase 3. Otherwise build batches of at most 6 merges each, keeping every batch
 to ONE repo so `pr-<number>.verdict` filenames cannot collide across repos. Order batches by newest
 merge so any pool-limit truncation remains newest-first. Batch numbering starts at 01 and is dense —
 a failed batch keeps its
@@ -160,16 +157,18 @@ never silent. For every batch build one item of the form:
 `batch-<NN>|<owner/repo>#<number>;<title>;<merged-at>|...` (titles stripped of `|` and `;`; each
 prompt also carries those repos' watch-paths and the classification rules below.)
 
-For each capacity-safe wave, use one `spawn_agents` call for 2–32 batches (profile
+Group the batches so every group's `sum(1 + PRs per batch) ≤ concurrency` and fire all groups'
+calls in the SAME turn: one `spawn_agents` call for 2–32 batches per group (profile
 `merge-classifier`; each member gets `maxTurns: 10000`, `timeoutSecs: 0`, and `maxTokens:
-75000000`), or `spawn_agent` for one batch. Wait for every coordinator and its grandchildren to
-finish and verify the wave before starting the next. Rebalance groups to avoid one-item calls; never
-spawn one call per batch. A batch child never loops over its PRs: turn 1 claims its ledger and
-splits the batch into per-PR grandchild prompts (repo, number, title, merged-at, that repo's
-watch-paths, and the verdict contract inline); turn 2 fires ONE spawn_agents call — one item per PR,
-same profile, `maxTurns: 10000`, `timeoutSecs: 0`, `maxTokens: 75000000` per grandchild — while a
-one-PR batch is classified directly instead; turn 3 verifies the verdict files and writes the batch
-report; turn 4 closes.
+75000000`), or `spawn_agent` for a single-batch group. There is no wave barrier — a finished
+group's results are verified as they land while later groups are still running; a failed batch is
+re-spawned once with the next turn's calls, keeping its number and ORIGINAL caps. Rebalance groups
+to avoid one-item calls; never spawn one call per batch. A batch child never loops over its PRs:
+turn 1 claims its ledger and splits the batch into per-PR grandchild prompts (repo, number, title,
+merged-at, that repo's watch-paths, and the verdict contract inline); turn 2 fires ONE spawn_agents
+call — one item per PR, same profile, `maxTurns: 10000`, `timeoutSecs: 0`, `maxTokens: 75000000`
+per grandchild — while a one-PR batch is classified directly instead; turn 3 verifies the verdict
+files and writes the batch report; turn 4 closes.
 
 Each grandchild handles exactly ONE PR: fetch the complete changed-file list (`per_page=100`,
 paginate if needed), including patches where available. Use the PR patch/diff to establish what
@@ -325,8 +324,9 @@ accumulates — comments are transient signal. Verify both artifacts with `gh ap
 
 - Spawn tool law: `spawn_agent` runs one child; `spawn_agents` accepts 2–32 items. Use the
   single-child tool for one item; rebalance multi-call groups so no call has one item. Keep
-  concurrent work within 64 subagents tree-wide; use sequential capacity-safe waves when needed,
-  especially when coordinators spawn grandchildren. Never fire one call per piece.
+  concurrent work within the concurrency knob (128 in the scan) tree-wide; group every dispatch so
+  each group's concurrent children fit it — a group that does not fit splits, it never waits on a
+  wave barrier. Never fire one call per piece.
 
 - The skills path law. All vendored skills live at WORKSPACE-RELATIVE paths:
   `.agents/skills/<name>/SKILL.md`, with their scripts at `.agents/skills/<name>/scripts/` — e.g.

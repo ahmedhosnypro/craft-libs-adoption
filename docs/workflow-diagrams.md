@@ -63,10 +63,9 @@ flowchart TD
     Init["Run start: window, Mission State,<br/>maintainer-verdict digest, mission.db"] --> P1["Phase 1 — Collect the window<br/>REST sweep over 17 repos + craft-helpers cross-check"]
     P1 --> P1b["Phase 1b — Clone the sources<br/>17 repos + storytold/craft-libs scope-truth"]
     P1b --> Zero{"Any merges in window?"}
-    Zero -->|Yes| P2["Phase 2 — Classify<br/>batches of ≤18 PRs, one repo each, newest-first"]
-    P2 --> Wave{"Wave finished and verified?"}
-    Wave -->|No| P2
-    Wave -->|Yes| P3["Phase 3 — File findings + pin bumps<br/>≤3 filers, ≤3 appliers, one turn"]
+    Zero -->|Yes| P2["Phase 2 — Classify<br/>batches of ≤6 PRs, one repo each, newest-first"]
+    P2 --> Groups["All groups dispatched in ONE turn<br/>each group's sum(1 + PRs per batch) ≤ 128"]
+    Groups --> P3["Phase 3 — File findings + pin bumps<br/>≤3 filers, ≤3 appliers, one turn"]
     Zero -->|No| P3
     P3 --> Stop{"Turn 180 stop rule"}
     Stop --> P4["Phase 4 — Deliver<br/>rollup-writer spawn_agent"]
@@ -76,8 +75,9 @@ flowchart TD
 
 ## 3. The run as a sequence
 
-The orchestrator never classifies, files, or delivers itself; each phase is a wave of specialist
-children, and every child deliverable is verified against `gh api` before the next wave starts.
+The orchestrator never classifies, files, or delivers itself; each phase is a capacity-grouped set of
+specialist children fired in one turn, and every child deliverable is verified against `gh api` as
+its group's results land — no wave barrier between groups.
 
 **Rollback-path note:** the arrows below are mission mode. Under the judged workflow the filer,
 applier, and rollup children only produce drafts in `run-ledger/`; the writes shown here move to
@@ -95,7 +95,7 @@ sequenceDiagram
     O->>O: Compute window, read Mission State, build verdict digest
     O->>C: spawn_agents — 18 clone items (scan-source, scope-truth)
     C-->>O: clone-ok / clone-degraded / clone-blocked per repo
-    O->>M: spawn_agents — batch-01..batch-NN (≤32 batches per call)
+    O->>M: spawn_agents — all groups' calls in one turn (≤32 batches per call, capacity-grouped)
     M->>G: spawn_agents — one item per PR in the batch
     G-->>M: pr-<number>.verdict line
     M-->>O: batch report (verdict count equals batch size)
@@ -111,7 +111,7 @@ sequenceDiagram
 
 Depth 3 by design and never deeper: coordinators may spawn grandchildren, grandchildren never
 spawn. Every spawn carries `maxTurns: 10000`, `timeoutSecs: 0`, `maxTokens: 75000000` — omitting
-`maxTokens` starves later waves of the run's 5,000,000,000-token budget.
+`maxTokens` starves later groups of the run's 5,000,000,000-token budget.
 
 ```mermaid
 flowchart LR
@@ -123,10 +123,11 @@ flowchart LR
     O --> R["rollup-writer ×1<br/>depth 1, spawn_agent"]
 ```
 
-## 5. Inside one classification wave
+## 5. Inside one classification batch
 
 A batch child never loops over its PRs. Its four moves — claim, spawn, verify and report, close —
 and the grandchildren's three describe the fastest honest path; turn counts are guidance, not caps.
+Batches across groups run concurrently; a coordinator sees only its own batch.
 
 ```mermaid
 sequenceDiagram
@@ -223,14 +224,14 @@ timeline
 
 ## 9. The subagent budget
 
-At most 256 subagents per run, at most 64 concurrent tree-wide. The reserve covers the 18 cloners,
+At most 256 subagents per run, at most 128 concurrent tree-wide. The reserve covers the 18 cloners,
 up to 6 filers/appliers, the rollup child, and retries; the rest is classifier coordinators and
 per-PR grandchildren. Beyond the cap the run classifies newest-first and reports the unclassified
 count as an exception.
 
 **Rollback-path note:** this pie is mission mode's pool. Under the judged workflow the engine
 sequences the 16 steps itself (`max-concurrent-steps: "4"`) and each dispatcher step still spawns
-its own specialist waves, bounded instead by the run's `max-total-turns: "10000"` and
+its own specialist groups, bounded instead by the run's `max-total-turns: "10000"` and
 `max-total-tokens: "100000000"` pool.
 
 ```mermaid
@@ -270,13 +271,14 @@ rollup's exception list — that is the audit trail for a failed lane.
 `rollup-draft` composes the snapshot from the terminal `run-ledger/outcomes/*.md` rows and the
 journal — skipped steps become named exceptions, never silence — with a bounded wait (≤45 min) for
 the file and bump lanes, and never claims an artifact it cannot verify. Worst case is ≈5 000 turns
-against the 10 000 pool (dispatchers ~2 900; four gates × 3 seats × up to 3 verdict rounds ~1 100;
-committers ~480). `max-feedback: "0"` on the appellate seats is what makes their `needs:
+against the 10 000 pool (dispatchers ~2 900; four gates × 3 seats × up to 3 verdict rounds ~1 100,
+plus the seat-repair rounds a gate can spend before failing closed; committers ~480).
+`max-feedback: "0"` on the appellate seats is what makes their `needs:
 [<judge>]` legal — feedback may never target another judge.
 
 ```mermaid
 flowchart TD
-    P["1 prepare — lib-adoption-analyst<br/>window sweep + Phase 1b clone wave + verdict digest"] --> C["2 classify — lib-adoption-analyst<br/>Phase 2 waves, capacity-safe"]
+    P["1 prepare — lib-adoption-analyst<br/>window sweep + Phase 1b clone wave + verdict digest"] --> C["2 classify — lib-adoption-analyst<br/>Phase 2 groups, capacity-grouped, one turn"]
     C --> CG{"3 classify-gate<br/>verdict-judge, panel 3, majority"}
     CG -->|pass| CA{"4 classify-appeal<br/>appellate-judge, panel 1, unanimous"}
 

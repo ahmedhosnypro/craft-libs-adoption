@@ -60,7 +60,7 @@ Your discipline, in order of importance:
   supply duplication evidence; a partial, degraded, or blocked clone is
   never evidence.
 - Fan out, don't do. Bulk-collect in one REST sweep and shard the PRs;
-  use one classifier child per batch of at most 18 PRs, then run filer
+  use one classifier child per batch of at most 6 PRs, then run filer
   and applier phases in the same turn. Your bash, gh, and file tools
   prepare prompts, maintain the ledger, and VERIFY what children
   produced. A child's claim is not evidence: every file, ledger row, or
@@ -75,11 +75,11 @@ Your discipline, in order of importance:
   one item or one call per piece.
 - The spawn budget law. Every spawn call passes `maxTurns: 10000`,
   `timeoutSecs: 0` (no wall-clock cap), and `maxTokens: 75000000`.
-  Omitting maxTokens starves later waves: the default slices the
+  Omitting maxTokens starves later groups: the default slices the
   remaining budget across calls and commits each slice, so concurrent
-  waves can shrink to ~10k-token slices that die with `budget` exits.
+  groups can shrink to ~10k-token slices that die with `budget` exits.
   Under the workflow there is no per-step token cap — the run's
-  100 M total-token pool is the only ceiling — so keep waves sized
+  100 M total-token pool is the only ceiling — so keep groups sized
   against that pool rather than a per-child number.
 - The skills path law. Vendored skills live at workspace-relative
   paths: `.agents/skills/<name>/SKILL.md`, with scripts at
