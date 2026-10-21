@@ -223,6 +223,87 @@ def render_journal(rec):
         )
 
 
+def render_session_message(rec, step):
+    """One model-visible message from a step's session transcript.
+
+    The workflow stream carries no per-turn detail, so these lines are
+    the liveness of a running step: its prompts, tool calls, and the
+    first line of each tool result.
+    """
+    tag = c(f"[{step}]", DIM)
+    role = rec.get("role")
+    if role == "assistant":
+        for call in rec.get("tool_calls") or []:
+            name = call.get("name", "?")
+            args = str(call.get("arguments") or "")
+            print(f"  {c(TURN_MARK, CYAN)} {tag} {c(f'{name:<11}', BOLD)} {first_line(args, BAR)}", flush=True)
+        text = str(rec.get("text") or "")
+        if text.strip():
+            print(f"  {c('·', DIM)} {tag} {first_line(text, 92)}", flush=True)
+    elif role == "user":
+        text = str(rec.get("text") or "")
+        if "## Judge feedback" in text:
+            print(f"  {c('↻', YELLOW)} {tag} re-prompted with judge feedback", flush=True)
+        else:
+            print(f"  {c('·', DIM)} {tag} prompt: {first_line(text, 88)}", flush=True)
+    elif role == "tool":
+        content = str(rec.get("content") or "")
+        mark = c("↳ error", RED) if rec.get("is_error") else c("↳", DIM)
+        if content.strip():
+            print(f"  {mark} {tag} {first_line(content, 92)}", flush=True)
+
+
+class SessionTail:
+    """Follows the run's per-step session transcripts — one
+    `sessions/<step-id>.jsonl`, one ChatMessage per line, appended as
+    the step's run works — rendering each message as it lands."""
+
+    def __init__(self, root):
+        self.root = root
+        self.handles = {}
+
+    def drain(self):
+        try:
+            names = sorted(
+                name for name in os.listdir(self.root) if name.endswith(".jsonl")
+            )
+        except OSError:
+            return False
+        rendered = False
+        for name in names:
+            handle = self.handles.get(name)
+            if handle is None:
+                try:
+                    handle = open(os.path.join(self.root, name), "rb")
+                except OSError:
+                    continue
+                self.handles[name] = handle
+            chunk = handle.read()
+            if not chunk:
+                continue
+            data = chunk.decode("utf-8", "replace")
+            for line in data.split("\n"):
+                if not line.strip():
+                    continue
+                rec = parse_record(line)
+                if rec is None:
+                    DROPS["count"] += 1  # unparsable JSON — drop, never stall
+                    continue
+                step = name[: -len(".jsonl")]
+                try:
+                    render_session_message(rec, step)
+                    rendered = True
+                except Exception as exc:  # a bad record never kills the render
+                    print(c(f"render skipped session record: {exc}", RED), flush=True)
+        return rendered
+
+    def settle(self, budget_seconds=5):
+        deadline = time.monotonic() + budget_seconds
+        while time.monotonic() < deadline:
+            self.drain()
+            time.sleep(0.2)
+
+
 def journal_path(run_id):
     root = os.environ.get("CRAFT_AGENT_JOURNAL_DIR") or os.path.join(
         os.environ.get("GITHUB_WORKSPACE") or os.getcwd(), ".craft-agent", "workflows"
@@ -315,6 +396,8 @@ def follow(path):
     inode = None
     carry = ""
     journal = None
+    sessions = None
+    last_signal = time.monotonic()
     print(c("renderer attached — following " + path, DIM), flush=True)
     try:
         while True:
@@ -330,6 +413,12 @@ def follow(path):
                 inode = (stat.st_ino, stat.st_dev)
                 carry = ""
             chunk = handle.read()
+            # Journal and session lines land while the run works, whether
+            # or not the framing stream has a new chunk this iteration.
+            if journal is not None and journal.drain():
+                last_signal = time.monotonic()
+            if sessions is not None and sessions.drain():
+                last_signal = time.monotonic()
             if chunk:
                 data = carry + chunk.decode("utf-8", "replace")
                 lines = data.split("\n")
@@ -345,7 +434,9 @@ def follow(path):
                     # carries the per-step detail this stream omits.
                     if journal is None and rec.get("type") == "workflow_started":
                         journal = JournalTail(journal_path(rec.get("run_id", "")))
+                        sessions = SessionTail(os.path.join(os.path.dirname(journal.path), "sessions"))
                         print(c("renderer attached — following " + journal.path, DIM), flush=True)
+                        print(c("renderer attached — following sessions", DIM), flush=True)
                     try:
                         outcome = render(rec, fold)
                     except BrokenPipeError:  # a closed log never kills the render
@@ -356,12 +447,22 @@ def follow(path):
                     if outcome == "done":
                         if journal is not None:
                             journal.settle()
+                        if sessions is not None:
+                            sessions.settle()
                         return
-                if journal is not None:
-                    journal.drain()
             elif STOP["flag"]:
                 return  # the agent is gone and the file is drained
             else:
+                # Silence is expected mid-step, so say so periodically: a
+                # quiet workflow run is alive, and this is the proof.
+                if journal is not None and time.monotonic() - last_signal > 90:
+                    waited = int(time.monotonic() - last_signal)
+                    print(
+                        f"  {c('…', DIM)} workflow still running — no new journal or session"
+                        f" lines for {waited}s",
+                        flush=True,
+                    )
+                    last_signal = time.monotonic()
                 for _ in range(4):
                     if STOP["flag"]:
                         break
