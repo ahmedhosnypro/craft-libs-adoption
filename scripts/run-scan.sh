@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Runs the adoption-scan mission with the live stream renderer attached.
+# Runs the adoption scan with the live stream renderer attached.
 # Self-contained on purpose: the composite action funnels the binary's
 # stdout into the transcript file, so nothing reaches the job log while a
 # run is alive; this wrapper installs the same release binaries, runs the
-# mission, and renders the stream into the log turn by turn.
+# scan, and renders the stream into the log turn by turn.
 set -euo pipefail
 
-VERSION="${CRAFT_AGENT_VERSION:-v0.0.4}"
+VERSION="${CRAFT_AGENT_VERSION:-v0.0.5}"
 REPO="${CRAFT_AGENT_RELEASE_REPOSITORY:-ahmedhosnypro/craft-agent}"
 
 case "${RUNNER_OS}:${RUNNER_ARCH}" in
@@ -45,9 +45,6 @@ git config --global --add safe.directory "$GITHUB_WORKSPACE"
 git config --global user.name "craft-agent"
 git config --global user.email "agent@craft-agent.invalid"
 
-prompt_file="${RUNNER_TEMP}/craft-agent-prompt.txt"
-printf '%s' "$CRAFT_AGENT_PROMPT" > "$prompt_file"
-
 if [ -n "${GH_TOKEN:-}" ]; then
   # The write-repo gh gate must fail closed; the credential helper is
   # runner-wide, so plain git push would bypass it. An empty knob means
@@ -63,16 +60,36 @@ case "${CRAFT_AGENT_READ_ROOTS:-}" in
 esac
 export CRAFT_AGENT_READ_ROOTS
 
+mode="mission"
+journal_dir=""
+prompt_file="${RUNNER_TEMP}/craft-agent-prompt.txt"
 stream="${RUNNER_TEMP}/craft-agent-stream.jsonl"
 read -ra extra_args <<< "${CRAFT_AGENT_ARGS:-}"
 
+# Workflow mode swaps the mission run for the judged workflow plan; its
+# stdout carries only the framing events, so the renderer follows the
+# run's journal for per-step detail. Mission mode stays the default.
+if [ -n "${CRAFT_AGENT_WORKFLOW:-}" ]; then
+  mode="workflow"
+  # --max-tokens is a per-step cap whose default already equals the
+  # plan's run-level total, so the flag is omitted by design.
+  agent_cmd=(craft-agent workflow
+    --workflow "$CRAFT_AGENT_WORKFLOW"
+    --output-format stream-json)
+  journal_dir="${GITHUB_WORKSPACE}/.craft-agent/workflows"
+else
+  printf '%s' "${CRAFT_AGENT_PROMPT:-}" > "$prompt_file"
+  agent_cmd=(craft-agent run
+    --max-turns "$CRAFT_AGENT_MAX_TURNS"
+    --max-tokens "$CRAFT_AGENT_MAX_TOKENS"
+    --output-format stream-json
+    --prompt "$prompt_file"
+    "${extra_args[@]}")
+fi
+export CRAFT_AGENT_JOURNAL_DIR="$journal_dir"
+
 set +e
-craft-agent run \
-  --max-turns "$CRAFT_AGENT_MAX_TURNS" \
-  --max-tokens "$CRAFT_AGENT_MAX_TOKENS" \
-  --output-format stream-json \
-  --prompt "$prompt_file" \
-  "${extra_args[@]}" > "$stream" &
+"${agent_cmd[@]}" > "$stream" &
 agent_pid=$!
 # The renderer follows the transcript as the binary writes it and prints
 # the run turn by turn into the job log; it exits on its own at the end.
@@ -80,21 +97,57 @@ python3 "${GITHUB_WORKSPACE}/scripts/stream-render.py" "$stream" &
 renderer_pid=$!
 wait "$agent_pid"
 rc=$?
+# The renderer ends on its own when the terminal event lands; a grace
+# window keeps a fast run from being torn mid-flush by the kill below.
+for _ in $(seq 1 100); do
+  kill -0 "$renderer_pid" 2>/dev/null || break
+  sleep 0.1
+done
 kill -TERM "$renderer_pid" 2>/dev/null || true
 wait "$renderer_pid" 2>/dev/null || true
 set -e
 
-case "$rc" in
-  0) conclusion="success" ;;
-  2) conclusion="max-turns" ;;
-  3) conclusion="budget" ;;
+report=""
+failed_step=""
+skipped_steps=""
+final_message=""
+if [ "$mode" = "workflow" ]; then
+  # The terminal line is workflow_finished with the whole report; there
+  # is no detail field to read a final message from. A missing report
+  # means the run never settled — a CLI or plan error, not a failed gate.
+  report="$(jq -c 'select(.type == "workflow_finished") | .report' "$stream" 2>/dev/null | tail -n 1 || true)"
+  failed_step="$(printf '%s' "$report" | jq -r '.failed_step // ""' 2>/dev/null || true)"
+  skipped_steps="$(printf '%s' "$report" | jq -r '[
+    .steps[]?
+    | select(.status.kind == "skipped")
+    | "\(.id)<-\(.status.reason.dep // .status.reason.kind // "?")"
+  ] | join(";")' 2>/dev/null || true)"
+  final_message="$(printf '%s' "$report" | jq -r '
+    "workflow \(.name // "?") \(.conclusion.kind // "?") exit \(.exit_code // 0) failed_step \(.failed_step // "-") skipped \(.steps | map(select(.status.kind == "skipped")) | length)"
+  ' 2>/dev/null || true)"
+else
+  final_message="$(tail -n 1 "$stream" | jq -r 'select(.type == "run_finished") | .detail // ""' 2>/dev/null || true)"
+fi
+
+# Workflow exit codes carry a failed step (1) distinctly from an error;
+# the mission taxonomy keeps 1 as an error.
+case "$mode:$rc" in
+  mission:0 | workflow:0) conclusion="success" ;;
+  workflow:1) conclusion="failed" ;;
+  mission:2 | workflow:2) conclusion="max-turns" ;;
+  mission:3 | workflow:3) conclusion="budget" ;;
   *) conclusion="error" ;;
 esac
-final_message="$(tail -n 1 "$stream" | jq -r 'select(.type == "run_finished") | .detail // ""' 2>/dev/null || true)"
+if [ "$mode" = "workflow" ] && [ -z "$report" ]; then
+  conclusion="error"
+fi
+: "${final_message:=workflow produced no report}"
 : "${final_message:=}"
 {
   echo "conclusion=${conclusion}"
   echo "exit-code=${rc}"
+  echo "failed-step=${failed_step}"
+  echo "skipped-steps=${skipped_steps}"
   echo "final-message<<CRAFT_AGENT_EOF"
   printf '%s\n' "$final_message"
   echo "CRAFT_AGENT_EOF"

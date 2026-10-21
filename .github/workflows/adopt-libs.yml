@@ -11,6 +11,11 @@ on:
         description: "Model id for this run (scheduled runs keep the MODEL_ID secret)"
         required: false
         default: github-actions
+      workflow:
+        description: "Run the judged adopt-libs workflow instead of the mission (empty = mission mode)"
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: write
@@ -156,6 +161,7 @@ jobs:
 
       - name: Load the mission prompt
         id: mission
+        if: ${{ !github.event.inputs.workflow }}
         run: |
           set -euo pipefail
           {
@@ -169,13 +175,18 @@ jobs:
         env:
           CRAFT_AGENT_PROVIDER: openai
           CRAFT_AGENT_MODEL: ${{ github.event.inputs.model || secrets.MODEL_ID }}
+          # Empty keeps the mission: the mission-only knob below is read by
+          # run-scan.sh there alone, so it may be left in place.
           CRAFT_AGENT_ARGS: --agent lib-adoption-analyst
           CRAFT_AGENT_MAX_TURNS: "250"
           CRAFT_AGENT_MAX_TOKENS: "5000000000"
+          CRAFT_AGENT_WORKFLOW: ${{ github.event.inputs.workflow }}
           # Ride out transient gateway drops mid-run.
           CRAFT_AGENT_STEP_RETRIES: "6"
           CRAFT_AGENT_WRITE_REPO: ${{ env.TARGET_REPO }}
           CRAFT_AGENT_EGRESS_ALLOWLIST: ${{ env.CRAFT_AGENT_EGRESS_ALLOWLIST }}
+          # The mission step is skipped in workflow mode, so this is empty
+          # there; run-scan.sh reads it only in mission mode.
           CRAFT_AGENT_PROMPT: ${{ steps.mission.outputs.text }}
           OPENAI_BASE_URL: ${{ secrets.MODEL_API_URL }}
           OPENAI_API_KEY: ${{ secrets.MODEL_API_KEY }}
@@ -190,7 +201,9 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: run-transcript
-          path: ${{ runner.temp }}/craft-agent-stream.jsonl
+          path:
+            - ${{ runner.temp }}/craft-agent-stream.jsonl
+            - .craft-agent/workflows/*/*/journal.jsonl
           if-no-files-found: warn
           retention-days: 7
 

@@ -7,6 +7,9 @@ run-ledger/
 classifications/
 .env
 
+# Workflow run journals are workspace-local scratch; only the plan file ships.
+/.craft-agent/workflows/*/
+
 # Local tracking databases never ship.
 progress.db
 *.db
