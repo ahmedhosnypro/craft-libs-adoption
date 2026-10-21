@@ -6,7 +6,7 @@ This repository automates a scan of the Craft Apps suite every six hours for mer
 
 | path | role |
 |---|---|
-| `.github/workflows/adopt-libs.yml` | The scan: cron at 00:20/06:20/12:20/18:20 UTC plus manual dispatch |
+| `.github/workflows/adopt-libs.yml` | The scan: cron at 00:20/06:20/12:20/18:20 UTC plus manual dispatch. Concurrency is event-scoped: scheduled runs serialize on one group, manual dispatches each join their own group (see the workflow's `concurrency` block) |
 | `config/repo-list.txt` | Repos scanned, their archetypes, watch-paths, and candidate hypotheses |
 | `missions/adopt-libs.md` | The phase-contract library the workflow step bodies cite and compress; also the mission-mode run prompt and the rollback path |
 | `scripts/run-scan.sh` | Runs the scan using the release binaries and streams it live (the stream is visible in the log); `CRAFT_AGENT_WORKFLOW` set runs the judged workflow, unset runs the mission |

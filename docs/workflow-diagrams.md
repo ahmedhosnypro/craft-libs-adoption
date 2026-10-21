@@ -25,7 +25,11 @@ lib-adoption-analyst --prompt <mission file>`. Workflow mode swaps that for `cra
 --workflow adopt-libs` (no `--max-tokens` — it is a per-step cap), with the renderer following
 `.craft-agent/workflows/<run_id>/journal.jsonl` for per-step detail; `run-scan.sh` selects it from
 `CRAFT_AGENT_WORKFLOW`, which the `workflow` dispatch input sets; scheduled runs and an empty input
-keep mission mode until the first live rehearsal — see section 10.
+keep mission mode until the first live rehearsal — see section 10. Concurrency is event-scoped:
+scheduled runs serialize on one group (`adopt-libs-scheduled`), and every manual dispatch joins its own
+group (`adopt-libs-${{ github.run_id }}`), so a mission scan and a workflow rehearsal can run at the
+same time — the tracking-issue state update and the `already-filed`/`already-open` checks are the
+racy surfaces those parallel runs share.
 
 ```mermaid
 flowchart TD

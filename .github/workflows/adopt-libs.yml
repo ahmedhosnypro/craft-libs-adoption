@@ -22,7 +22,11 @@ permissions:
   pull-requests: write
 
 concurrency:
-  group: adopt-libs
+  # Scheduled scans serialize on one group (a cron slot never overlaps the
+  # previous window); every manual dispatch joins its own group, so
+  # concurrent manual runs — a mission scan next to a workflow rehearsal —
+  # never block each other.
+  group: adopt-libs-${{ github.event_name == 'schedule' && 'scheduled' || github.run_id }}
   cancel-in-progress: false
 
 env:
