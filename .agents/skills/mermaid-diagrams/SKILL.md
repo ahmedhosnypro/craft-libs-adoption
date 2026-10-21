@@ -16,7 +16,7 @@ description: >
   request to draw or check a diagram. Do NOT use for rendering-only
   requests with no diagram authoring, validation, or documentation
   involved.
-version: 1.0.0
+version: 1.1.0
 ---
 
 # Mermaid Diagrams
@@ -147,6 +147,10 @@ bun <skill-dir>/scripts/validate-mermaid.ts <file.md|.mmd>...
 - Exit codes: `0` green (or nothing discovered), `1` invalid input,
   `2` usage error.
 
+Regression tests for renderer-verified defects live in
+`scripts/tests/validate-mermaid.defects.test.ts` — run them with
+`bun test scripts/tests/` after any validator change.
+
 Checks performed:
 
 1. Fences must close; an unterminated fence is reported at its opening line.
@@ -159,8 +163,16 @@ Checks performed:
    `C4Dynamic`, `C4Deployment`, `requirementDiagram`, `sankey-beta`, `xychart-beta`,
    `architecture-beta`, `block-beta`, `kanban`, `radar`,
    `radar-beta` (case-insensitive).
-4. For flowchart/graph only: a line starting with an arrow operator
-   (`-->`, `==>`, `-.->`, `---`) and no source node is a malformed edge.
+4. For flowchart/graph only: two defect classes — a line starting with
+   an arrow operator (`-->`, `==>`, `-.->`, `---`) and no source node
+   is a malformed edge, and the state-diagram-only terminal `[*]` used
+   as a node/edge token (label text inside quotes or pipe labels is
+   ignored).
+5. For timeline only: the period position of a `period : event`
+   statement must stay colon-free — a colon before the spaced ` : `
+   separator, or attached to the first token with no separator, breaks
+   the renderer's lexer (event text may carry colons; `title` /
+   `section` lines are exempt).
 
 The validator is deliberately conservative — passing it does not prove
 the diagram renders; it proves the structure is sound. When Bun is

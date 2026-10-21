@@ -21,7 +21,8 @@
  * raw triple-backtick mermaid fence (enumerated via array-argument
  * `git ls-files -- docs` — never shell-interpolated).
  *
- * DEFINED BEHAVIOR (all asserted in scripts/validate-mermaid.test.ts):
+ * DEFINED BEHAVIOR (all asserted in scripts/validate-mermaid.test.ts plus
+ * scripts/tests/validate-mermaid.defects.test.ts):
  *
  * 1. Fence extraction (markdown only). An opening fence is a line matching
  *    three backticks plus the word `mermaid` at column zero-to-three,
@@ -42,13 +43,23 @@
  *    beta suffix is optional-tolerant). Leading comment lines are skipped
  *    while locating the declaring line (Mermaid ignores such comments); a
  *    comments-only block fails rule 2 instead.
- * 4. Line-level sanity applies ONLY to flowchart/graph diagrams and ONLY to
- *    one unambiguous defect class: a line whose first characters are an
- *    arrow operator (`-->`, `==>`, `-.->`, `---`) with no source node token
- *    before them. Deliberately UNDER-flagging per design brief (false
- *    positives cost more than missed exotic syntax); everything else is
- *    left to rule 3.
- * 5. Exit codes: 0 = green (or default-discovery found zero diagrams — the
+ * 4. Line-level sanity applies ONLY to flowchart/graph diagrams, and ONLY to
+ *    unambiguous defect classes. Deliberately UNDER-flagging per design brief
+ *    (false positives cost more than missed exotic syntax); everything else
+ *    is left to rule 3. Two defect classes are caught:
+ *    a. A line whose first characters are an arrow operator (`-->`, `==>`,
+ *       `-.->`, `---`) with no source node token before them.
+ *    b. The state-diagram-only terminal `[*]` used as a node/edge token —
+ *       the renderer fails the parse in this family. Detection strips double-
+ *       quoted label text and pipe edge-label spans first, so a literal
+ *       `[*]` inside label text is not a node.
+ * 5. Timeline statements have the shape `period : event`. The renderer's
+ *    lexer terminates the period at its first colon, so a colon in the
+ *    PERIOD position fails the parse while the EVENT text may carry colons
+ *    freely. Flagged when a colon precedes the spaced ` : ` separator, and
+ *    when the first token carries a colon with no spaced separator present.
+ *    `title` / `section` / `period` / `event` header lines are exempt.
+ * 6. Exit codes: 0 = green (or default-discovery found zero diagrams — the
  *    CI wrapper owns empty-set semantics), 1 = any validation failure /
  *    unreadable input / enumeration failure, 2 = usage error (dash-prefixed
  *    flag argument; no flags exist by contract).
@@ -190,6 +201,44 @@ const BARE_ARROW_START = /^\s*(-->|==>|-\.-|---)/;
 
 const GRAPH_FAMILY = new Set(["flowchart", "graph"]);
 
+const TIMELINE_FAMILY = "timeline";
+
+/**
+ * Timeline statement shapes: `period : event`. Also the header line keywords
+ * whose trailing text is free-form (exempt from the period-colon rule).
+ */
+const TIMELINE_HEADER_LINE = /^(?:title|section|period|event)\b/i;
+
+/** State-diagram terminal token; meaningless — and parse-fatal — in a graph. */
+const STATE_TERMINAL = /\[\*\]/;
+
+/** Double-quoted label text — inert characters, never a node/edge token. */
+const QUOTED_SPAN = /"[^"]*"/g;
+
+/** Pipe-delimited edge-label spans (`-->|text|`) — also inert text. */
+const PIPE_LABEL_SPAN = /\|[^|]*\|/g;
+
+/** Strip quoted labels and pipe edge labels so only real tokens remain. */
+function stripLabelText(line: string): string {
+  return line.replace(QUOTED_SPAN, "").replace(PIPE_LABEL_SPAN, "");
+}
+
+/**
+ * True when a timeline statement carries a colon in the PERIOD position. The
+ * renderer's lexer terminates the period at its first colon, so the first
+ * colon must be the ` : ` separator itself (or the line has no colon). A
+ * colon attached to the first token with no spaced separator breaks too,
+ * while event text after the separator may carry colons freely.
+ */
+function timelinePeriodCarriesColon(statement: string): boolean {
+  const separatorIndex = statement.indexOf(" : ");
+  const firstColonIndex = statement.indexOf(":");
+  if (firstColonIndex === -1) return false;
+  if (separatorIndex !== -1) return firstColonIndex < separatorIndex;
+  const firstToken = statement.split(/\s+/)[0] ?? "";
+  return firstToken.includes(":");
+}
+
 /**
  * Structural validation of ONE diagram's source (fence-agnostic — applied
  * wholesale to `.mmd` files too). Deterministic offline rules 2–4.
@@ -217,7 +266,8 @@ export function validateDiagramSource(source: string): DiagramIssue[] {
     ];
   }
 
-  // Rule 4 — conservative edge sanity for the flowchart/graph family only.
+  // Rule 4a — conservative edge sanity for the flowchart/graph family only.
+  // Rule 4b — state-only terminal rejected in the same family.
   const issues: DiagramIssue[] = [];
   if (GRAPH_FAMILY.has(token.toLowerCase())) {
     for (let index = 0; index < lines.length; index += 1) {
@@ -228,6 +278,28 @@ export function validateDiagramSource(source: string): DiagramIssue[] {
         issues.push({
           line: index + 1,
           message: `malformed edge: line begins with arrow "${arrow[1]}" but carries no source node before it`,
+        });
+      }
+      if (STATE_TERMINAL.test(stripLabelText(line))) {
+        issues.push({
+          line: index + 1,
+          message: 'state-diagram terminal "[*]" cannot be used as a node in a flowchart/graph — give the endpoint a named node id',
+        });
+      }
+    }
+  }
+
+  // Rule 5 — timeline statements: the period position must stay colon-free.
+  if (token.toLowerCase() === TIMELINE_FAMILY) {
+    for (let index = 0; index < lines.length; index += 1) {
+      const trimmed = (lines[index] ?? "").trim();
+      if (trimmed.length === 0 || trimmed.startsWith("%%")) continue;
+      if (TIMELINE_HEADER_LINE.test(trimmed)) continue;
+      if (timelinePeriodCarriesColon(trimmed)) {
+        issues.push({
+          line: index + 1,
+          message:
+            "malformed timeline statement: colon inside the period text — the period must be colon-free (move clock times into the event text after ' : ')",
         });
       }
     }
