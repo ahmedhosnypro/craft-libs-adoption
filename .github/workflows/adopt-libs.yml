@@ -201,9 +201,9 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: run-transcript
-          path:
-            - ${{ runner.temp }}/craft-agent-stream.jsonl
-            - .craft-agent/workflows/*/*/journal.jsonl
+          path: |
+            ${{ runner.temp }}/craft-agent-stream.jsonl
+            .craft-agent/workflows/*/*/journal.jsonl
           if-no-files-found: warn
           retention-days: 7
 
