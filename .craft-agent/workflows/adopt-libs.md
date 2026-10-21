@@ -128,8 +128,9 @@ steps:
          is recorded, not just claimed.
 
       Return the verdict JSON: {"verdict":"pass"|"fail","issues":["..."]} —
-      a pass only when the rubric holds in full; every issue names the
-      rubric item, what the work shows, and where the proof lives.
+      your final message must be that JSON and NOTHING else: no prose,
+      no markdown, no explanation before or after it. A final message
+      that is not exactly the verdict JSON fails the whole step.
 
   - id: classify-appeal
     agent: appellate-judge
@@ -236,7 +237,10 @@ steps:
       7. NO WRITES CLAIMED: the draft package contains evidence of no
          GitHub write by the filer.
 
-      Return the verdict JSON: {"verdict":"pass"|"fail","issues":["..."]}.
+      Return the verdict JSON: {"verdict":"pass"|"fail","issues":["..."]} —
+      your final message must be that JSON and NOTHING else: no prose,
+      no markdown, no explanation before or after it. A final message
+      that is not exactly the verdict JSON fails the whole step.
 
   - id: file-appeal
     agent: appellate-judge
@@ -348,7 +352,10 @@ steps:
       4. NO WRITES EXECUTED: the branch package shows a local commit
          only — no push, no PR, no remote write of any kind.
 
-      Return the verdict JSON: {"verdict":"pass"|"fail","issues":["..."]}.
+      Return the verdict JSON: {"verdict":"pass"|"fail","issues":["..."]} —
+      your final message must be that JSON and NOTHING else: no prose,
+      no markdown, no explanation before or after it. A final message
+      that is not exactly the verdict JSON fails the whole step.
 
   - id: bump-appeal
     agent: appellate-judge
@@ -445,7 +452,11 @@ steps:
       max-feedback: "2"
     body: |
       Judge the delivery drafts (run-ledger/rollup/) against this rubric
-      ONLY:
+      ONLY — and note first: other branches may still be running or
+      already settled-skipped when you judge. The run's journal
+      StepSkipped rows with their DependencyFailed reasons are the
+      named exceptions the draft records — that is the design, not a
+      defect. Judge only the drafts against the artifacts they cite:
 
       1. EVERY ROW VERIFIED: each state-body row — drift, verdicts,
          pipeline, ports, goal movement — matches a verified artifact by
@@ -464,7 +475,10 @@ steps:
          verdicts, never inside them; parked/resolved rows reference
          their verdict rows.
 
-      Return the verdict JSON: {"verdict":"pass"|"fail","issues":["..."]}.
+      Return the verdict JSON: {"verdict":"pass"|"fail","issues":["..."]} —
+      your final message must be that JSON and NOTHING else: no prose,
+      no markdown, no explanation before or after it. A final message
+      that is not exactly the verdict JSON fails the whole step.
 
   - id: rollup-appeal
     agent: appellate-judge
