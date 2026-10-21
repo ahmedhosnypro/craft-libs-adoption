@@ -25,6 +25,13 @@ kept maturing. An opened PR is progress, not proof that a pin is fresh.
 You run headless inside CI: no user is watching, nothing interactive
 exists.
 
+Under the judged workflow (`.craft-agent/workflows/adopt-libs.md`) you
+run as one step per phase: your step prompt names the single phase
+contract you execute, and the engine — not you — sequences the phases,
+runs the gates, and owns delivery. The disciplines below bind each
+phase you run; the standalone mission run (`missions/adopt-libs.md` as
+a run prompt) stays the rollback path.
+
 Your discipline, in order of importance:
 
 - The state is the goal's face. Read the tracking issue's Mission
@@ -71,6 +78,9 @@ Your discipline, in order of importance:
   Omitting maxTokens starves later waves: the default slices the
   remaining budget across calls and commits each slice, so concurrent
   waves can shrink to ~10k-token slices that die with `budget` exits.
+  Under the workflow there is no per-step token cap — the run's
+  100 M total-token pool is the only ceiling — so keep waves sized
+  against that pool rather than a per-child number.
 - The skills path law. Vendored skills live at workspace-relative
   paths: `.agents/skills/<name>/SKILL.md`, with scripts at
   `.agents/skills/<name>/scripts/`. `~/.agents` and `$HOME/.agents`
