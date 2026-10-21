@@ -29,7 +29,7 @@ from children doing serial work:
 - You collect the whole window yourself in one REST sweep — two orchestrator turns at most. Children
   never collect the window.
 
-- Shard raw PRs into batches of at most 6. Plan the dispatch as capacity-grouped calls fired in ONE turn so every group's `sum(1 + PRs per batch) ≤ concurrency` (128 with the scan's knob); that counts each coordinator and its possible per-PR grandchildren. Fire every group's call in the same turn — no wave barrier: verification of a finished group happens as its results land while the next group is already running. Within a group use one `spawn_agents` call for 2..=32 batches, or `spawn_agent` for one batch; never create one-item `spawn_agents` calls. Rebalance call groups so none has one item. A re-spawn for a failed batch keeps its number as `batch-<NN>-retry` and fires with the next turn's calls, never as a new wave.
+- Shard raw PRs into batches of at most 6. Plan the dispatch as capacity-grouped calls fired in ONE turn so every group's `sum(1 + PRs per batch) ≤ concurrency` (1024 with the scan's knob); that counts each coordinator and its possible per-PR grandchildren. Fire every group's call in the same turn — no wave barrier: verification of a finished group happens as its results land while the next group is already running. Within a group use one `spawn_agents` call for 2..=32 batches, or `spawn_agent` for one batch; never create one-item `spawn_agents` calls. Rebalance call groups so none has one item. A re-spawn for a failed batch keeps its number as `batch-<NN>-retry` and fires with the next turn's calls, never as a new wave.
 
 - Per-item work never loops inside one agent. A batch child with more than one PR spawns ONE
   grandchild per PR in a single spawn_agents call and only aggregates; a one-PR batch is classified
@@ -40,28 +40,24 @@ from children doing serial work:
 - Single-deliverable children (filer, applier, rollup) own ONE deliverable, never a per-item loop —
   turns are free, scope is not.
 
-- THE SPAWN BUDGET LAW — pass all three on EVERY spawn call: `maxTurns: 10000` (the tool ceiling;
-  effectively unbounded — the stationarity guard, not turn counts, is the loop-safety bound),
-  `timeoutSecs: 0` (no wall-clock cap; children work freely until done), and `maxTokens: 75000000`
-  per member. Never OMIT maxTokens: the default slice divides the remaining run budget across the
-  batch and each call commits it all, so concurrent groups starve later children to ~10k-token
-  slices that die with `budget` exits. Never pass a small maxTokens either — 75,000,000 tokens is
-  far beyond any child's real need while 128 concurrent children still fit inside the
-  5,000,000,000 run budget. Under the workflow (`.craft-agent/workflows/adopt-libs.md`) there is no
-  per-step token cap, so the classify dispatch law sizes its groups against the run's
-  `max-total-tokens: "100000000"` pool and the 128-concurrency knob.
-
+- THE SPAWN BUDGET LAW — pass `maxTurns: 10000` (the tool ceiling; effectively unbounded — the
+  stationarity guard, not turn counts, is the loop-safety bound) and `timeoutSecs: 0` (no wall-clock
+  cap; children work freely until done) on EVERY spawn call, and OMIT `maxTokens`: subagent token
+  budgets are UNLIMITED by default and reserve nothing, so a group's admission no longer depends on
+  a slice-times-count reservation. Pass a number only when one specific child must be capped; the
+  run's own token budget (5,000,000,000 for the mission run, the workflow plan's total for workflow
+  steps) is the run-level guard that fails closed (exit 3).
 - Exactly one grandchild level (depth 3): a grandchild never spawns.
 
 ## The pool envelope (plan inside it)
 
-- Concurrency: at most 128 subagents at once, tree-wide. Batch: 2-32 items per spawn_agents call,
+- Concurrency: at most 1024 subagents at once, tree-wide. Batch: 2-32 items per spawn_agents call,
   prompts ≤ 64 KiB each.
 
-- Total: at most 256 subagents per run — reserve ~30 (18 cloners, ≤6 filers/appliers, rollup,
-  retries); batch children plus per-PR grandchildren must fit the rest (~226 PRs, ~32 batches of
-  6). Beyond that, classify newest-first and report the unclassified count as an EXCEPTION. Depth: at
-  most 4; this design uses 3 and must not go deeper.
+- Total: at most 1024 subagents per run — reserve ~30 (18 cloners, ≤6 filers/appliers, rollup,
+  retries); batch children plus per-PR grandchildren take the rest (~994 PRs). Beyond that,
+  classify newest-first and report the unclassified count as an EXCEPTION. Depth: at most 4; this
+  design uses 3 and must not go deeper.
 
 - Every agent follows the vendored pooled-missions skill (.agents/skills/pooled-missions/SKILL.md):
   own ledger at the path the prompt names, claim/done transitions, park-never-delete.
@@ -123,7 +119,7 @@ zero merges, because duplication is proven across the suite, not across the wind
 for scope-truth). If the list grows beyond 32 items, split into calls of 2–32 items, rebalancing so
 no call has one item; if the combined active calls would exceed the concurrency knob, split the
 clones into sequential capacity-safe waves.
-Each member receives `maxTurns: 10000`, `timeoutSecs: 0`, and `maxTokens: 75000000`. Item shape:
+Each member receives `maxTurns: 10000`, `timeoutSecs: 0`, and . Item shape:
 `<owner/repo>|<watch-paths csv>|<purpose>` where purpose is `scan-source`, or `scope-truth` for
 craft-libs (its watch-paths are `AGENTS.md,Cargo.toml,crates,docs,licenses` — the root `Cargo.toml`
 carries the real `[workspace.dependencies]` `craft-` list that the filer's crate-name gate reads;
@@ -159,14 +155,14 @@ prompt also carries those repos' watch-paths and the classification rules below.
 
 Group the batches so every group's `sum(1 + PRs per batch) ≤ concurrency` and fire all groups'
 calls in the SAME turn: one `spawn_agents` call for 2–32 batches per group (profile
-`merge-classifier`; each member gets `maxTurns: 10000`, `timeoutSecs: 0`, and `maxTokens:
-75000000`), or `spawn_agent` for a single-batch group. There is no wave barrier — a finished
+`merge-classifier`; each member gets `maxTurns: 10000` and `timeoutSecs: 0`), or `spawn_agent` for
+a single-batch group. There is no wave barrier — a finished
 group's results are verified as they land while later groups are still running; a failed batch is
 re-spawned once with the next turn's calls, keeping its number and ORIGINAL caps. Rebalance groups
 to avoid one-item calls; never spawn one call per batch. A batch child never loops over its PRs:
 turn 1 claims its ledger and splits the batch into per-PR grandchild prompts (repo, number, title,
 merged-at, that repo's watch-paths, and the verdict contract inline); turn 2 fires ONE spawn_agents
-call — one item per PR, same profile, `maxTurns: 10000`, `timeoutSecs: 0`, `maxTokens: 75000000`
+call — one item per PR, same profile, `maxTurns: 10000`, `timeoutSecs: 0`, 
 per grandchild — while a one-PR batch is classified directly instead; turn 3 verifies the verdict
 files and writes the batch report; turn 4 closes.
 
@@ -239,7 +235,7 @@ Fire the calls in the SAME turn:
   one call per item.
 
 - `spawn_agents`, profile `finding-filer`, one finding per item (≤3), `maxTurns: 10000`,
-  `timeoutSecs: 0`, `maxTokens: 75000000`. Each item ALSO carries that finding's shard contents: the
+  `timeoutSecs: 0`, . Each item ALSO carries that finding's shard contents: the
   proposed crate name (`craft-<name>` for a hoist; the existing craft-libs crate for a port), a
   boundary sketch (one line per returns / apps keep / not in scope), and any known upstream anchor
   numbers (from the pipeline row or the verdict digest lines). The filer VERIFIES these against the
@@ -283,7 +279,7 @@ Fire the calls in the SAME turn:
   already exists, the filer verifies it and returns `already-filed` — no second issue, no comment.
 
 - `spawn_agents`, profile `revsync-applier`, one candidate per item (≤3), `maxTurns: 10000`,
-  `timeoutSecs: 0`, `maxTokens: 75000000`. The template carries the target HEAD (the verified
+  `timeoutSecs: 0`, . The template carries the target HEAD (the verified
 `sources/craft-libs/` rev), the branch-name dedupe key, the scratch-clone mechanics, pin-lines-only,
 and the law: any denial (write gate, 403, protected branch) is recorded as a blocker — never a
 crash, never a retry. If the scope-truth clone is not verified, do not open pin bumps against it;
@@ -300,7 +296,7 @@ does not carry fails the phase like any other unverifiable claim.
 
 ## Phase 4 — Deliver: one spawn_agent call
 
-Profile `rollup-writer`, `maxTurns: 10000`, `timeoutSecs: 0`, `maxTokens: 75000000`. The prompt
+Profile `rollup-writer`, `maxTurns: 10000`, `timeoutSecs: 0`, . The prompt
 carries the state snapshot you composed: the previous Mission State body, this window's drift rows
 (from applier outcomes), maturing candidates with window IDs, last-seen window, consecutive-window
 streak and corroboration counts, every verified artifact by number, `already-tracked` findings with
@@ -361,7 +357,7 @@ accumulates — comments are transient signal. Verify both artifacts with `gh ap
 - Every child is self-contained: its prompt carries its batch, its data, its output contract, its
   ledger path, its caps, and the rules it must obey — no references to "the mission" or "as
   discussed". A child that returns without its deliverable is re-spawned ONCE with a narrowed
-  prompt, keeping the ORIGINAL caps (maxTurns, timeoutSecs, maxTokens) — retries never shrink them;
+  prompt, keeping the ORIGINAL caps (maxTurns, timeoutSecs) — retries never shrink them;
   after a second failure the gap becomes an exception in the window comment. Never redo a completed
   child's work yourself.
 

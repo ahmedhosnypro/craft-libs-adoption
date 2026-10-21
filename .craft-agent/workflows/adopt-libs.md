@@ -73,7 +73,7 @@ steps:
         concurrency knob), then fire every group's call in the same
         turn — one `spawn_agents` call for 2–32 batches per group
         (profile merge-classifier; every member maxTurns 10000,
-        timeoutSecs 0, maxTokens 75000000), or `spawn_agent` for a
+        timeoutSecs 0), or `spawn_agent` for a
         single-batch group. NO wave barrier: a finished group's verdict
         files are verified as they land while later groups still run; a
         failed batch re-spawns once with the next turn's calls (number
@@ -189,7 +189,7 @@ steps:
         the state body.
       - Dispatch: `spawn_agents` profile finding-filer, one finding per
         item (≤3), every member maxTurns 10000, timeoutSecs 0,
-        maxTokens 75000000 (one item → `spawn_agent`; never a one-item
+        (one item → `spawn_agent`; never a one-item
         call). Each item carries the finding's full shard:
         proposed crate name, boundary sketch, anchor numbers, evidence
         merges (owner/name#number), the window, the ledger path, the
@@ -313,7 +313,7 @@ steps:
         blocked/deferred and report the exception.
       - Dispatch: `spawn_agents` profile revsync-applier, one candidate
         per item (≤3), every member maxTurns 10000, timeoutSecs 0,
-        maxTokens 75000000 (one item → `spawn_agent`; never a one-item
+        (one item → `spawn_agent`; never a one-item
         call). Each item carries the app repo, the crate,
         the target HEAD and short rev (the verified sources/craft-libs/
         rev), the evidence compare range, the branch-name dedupe key,
@@ -431,7 +431,7 @@ steps:
         reason (exceptions — named, never silent).
       - Dispatch once: `spawn_agent` profile rollup-writer (single
         deliverable, so the single-child tool), maxTurns 10000,
-        timeoutSecs 0, maxTokens 75000000, the prompt carrying the full
+        timeoutSecs 0, the prompt carrying the full
         snapshot and the prior Mission State body. Its profile is its
         contract: it composes `run-ledger/rollup/state-body.md`,
         `run-ledger/rollup/comment.md`, and `run-ledger/rollup/target.md`

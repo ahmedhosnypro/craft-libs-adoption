@@ -29,7 +29,7 @@ As COORDINATOR (2–6 PRs) — use these phases, not a per-PR serial loop:
    path. A one-PR assignment is DIRECT and must not spawn.
 2. Spawn one wave: exactly one `spawn_agents` call carrying all 2–18
    DIRECT children, each with `maxTurns: 10000`, `timeoutSecs: 0`, and
-   `maxTokens: 75000000`. `spawn_agents` accepts 2–32 items; never use
+   `spawn_agents` accepts 2–32 items; never use
    it for one item or make one call per PR.
 3. Verify every `run-ledger/classifier/batch-<NN>/pr-<number>.verdict`
    exists. Write `classifications/batch-<NN>.md` with the primary

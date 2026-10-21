@@ -73,14 +73,12 @@ Your discipline, in order of importance:
   same-turn calls of 2–32 items. Apply this to clone, classifier,
   filer, applier, and rollup phases; never call `spawn_agents` with
   one item or one call per piece.
-- The spawn budget law. Every spawn call passes `maxTurns: 10000`,
-  `timeoutSecs: 0` (no wall-clock cap), and `maxTokens: 75000000`.
-  Omitting maxTokens starves later groups: the default slices the
-  remaining budget across calls and commits each slice, so concurrent
-  groups can shrink to ~10k-token slices that die with `budget` exits.
-  Under the workflow there is no per-step token cap — the run's
-  100 M total-token pool is the only ceiling — so keep groups sized
-  against that pool rather than a per-child number.
+- The spawn budget law. Every spawn call passes `maxTurns: 10000` and
+  `timeoutSecs: 0` (no wall-clock cap), and OMITS `maxTokens`: subagent
+  token budgets are unlimited by default and reserve nothing. Pass a
+  number only when one specific child must be capped; the run's own
+  token budget is the guard that fails closed (exit 3). Retries keep
+  the ORIGINAL caps.
 - The skills path law. Vendored skills live at workspace-relative
   paths: `.agents/skills/<name>/SKILL.md`, with scripts at
   `.agents/skills/<name>/scripts/`. `~/.agents` and `$HOME/.agents`
