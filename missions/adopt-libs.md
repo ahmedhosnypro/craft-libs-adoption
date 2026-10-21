@@ -1,3 +1,8 @@
+<!--
+  Phase-contract library for `.craft-agent/workflows/adopt-libs.md`: each of its 16 step bodies
+  cites and compresses the phase contracts below. Also the mission-mode run prompt — the CI
+  default today and the rollback path if the judged workflow is ever reverted.
+-->
 # Mission: the six-hour craft-libs adoption scan
 
 The goal: keep every Craft App on fresh craft-libs pins, and surface every generic change worth
@@ -46,7 +51,9 @@ from children doing serial work:
   batch and each call commits it all, so concurrent waves starve later children to ~10k-token slices
   that die with `budget` exits. Never pass a small maxTokens either — 75,000,000 tokens is far
   beyond any child's real need while 64 concurrent children still fit inside the 5,000,000,000 run
-  budget.
+  budget. Under the workflow (`.craft-agent/workflows/adopt-libs.md`) there is no per-step token cap,
+  so the classify dispatch law sizes its waves so expected child usage fits the run's
+  `max-total-tokens: "100000000"` pool.
 
 - Exactly one grandchild level (depth 3): a grandchild never spawns.
 
