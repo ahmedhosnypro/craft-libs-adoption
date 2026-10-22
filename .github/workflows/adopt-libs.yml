@@ -32,8 +32,8 @@ concurrency:
 env:
   TARGET_REPO: ahmedhosnypro/craft-libs
   # Subagent pool knobs (runtime ceilings: 1024 / 256 / 4).
-  CRAFT_AGENT_SUBAGENT_MAX_CONCURRENCY: "128"
-  CRAFT_AGENT_SUBAGENT_MAX_TOTAL: "256"
+  CRAFT_AGENT_SUBAGENT_MAX_CONCURRENCY: "1024"
+  CRAFT_AGENT_SUBAGENT_MAX_TOTAL: "1024"
   CRAFT_AGENT_SUBAGENT_MAX_DEPTH: "4"
   # One model call may stream past 5 minutes (thinking models); the
   # client deadline must exceed real generation time.
