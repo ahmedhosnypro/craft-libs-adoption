@@ -12,10 +12,13 @@ on:
         required: false
         default: github-actions
       workflow:
-        description: "Run the judged adopt-libs workflow instead of the mission (empty = mission mode)"
+        description: "Which run: the judged adopt-libs workflow, or the mission (today's default)"
         required: false
-        default: ""
-        type: string
+        default: mission
+        type: choice
+        options:
+          - mission
+          - adopt-libs
 
 permissions:
   contents: write
@@ -31,7 +34,7 @@ concurrency:
 
 env:
   TARGET_REPO: ahmedhosnypro/craft-libs
-  # Subagent pool knobs (runtime ceilings: 1024 / 256 / 4).
+  # Subagent pool knobs (runtime ceilings: 1024 / 1024 / 4).
   CRAFT_AGENT_SUBAGENT_MAX_CONCURRENCY: "1024"
   CRAFT_AGENT_SUBAGENT_MAX_TOTAL: "1024"
   CRAFT_AGENT_SUBAGENT_MAX_DEPTH: "4"
@@ -165,7 +168,7 @@ jobs:
 
       - name: Load the mission prompt
         id: mission
-        if: ${{ !github.event.inputs.workflow }}
+        if: ${{ github.event.inputs.workflow != 'adopt-libs' }}
         run: |
           set -euo pipefail
           {
@@ -179,12 +182,14 @@ jobs:
         env:
           CRAFT_AGENT_PROVIDER: openai
           CRAFT_AGENT_MODEL: ${{ github.event.inputs.model || secrets.MODEL_ID }}
-          # Empty keeps the mission: the mission-only knob below is read by
-          # run-scan.sh there alone, so it may be left in place.
+          # Mission-only knobs below — read by run-scan.sh in mission mode
+          # alone, so they may be left in place in workflow mode.
           CRAFT_AGENT_ARGS: --agent lib-adoption-analyst
           CRAFT_AGENT_MAX_TURNS: "250"
           CRAFT_AGENT_MAX_TOKENS: "5000000000"
-          CRAFT_AGENT_WORKFLOW: ${{ github.event.inputs.workflow }}
+          # The dispatch dropdown selects the judged workflow; anything
+          # else keeps the mission. run-scan.sh switches on this.
+          CRAFT_AGENT_WORKFLOW: ${{ github.event.inputs.workflow == 'adopt-libs' && 'adopt-libs' || '' }}
           # Ride out transient gateway drops mid-run.
           CRAFT_AGENT_STEP_RETRIES: "6"
           CRAFT_AGENT_WRITE_REPO: ${{ env.TARGET_REPO }}
