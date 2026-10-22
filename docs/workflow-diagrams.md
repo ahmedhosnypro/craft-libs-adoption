@@ -270,10 +270,11 @@ rollup's exception list — that is the audit trail for a failed lane.
 
 `rollup-draft` composes the snapshot from the terminal `run-ledger/outcomes/*.md` rows and the
 journal — skipped steps become named exceptions, never silence — with a bounded wait (≤45 min) for
-the file and bump lanes, and never claims an artifact it cannot verify. Worst case is ≈5 000 turns
-against the 10 000 pool (dispatchers ~2 900; four gates × 3 seats × up to 3 verdict rounds ~1 100,
-plus the seat-repair rounds a gate can spend before failing closed; committers ~480).
-`max-feedback: "0"` on the appellate seats is what makes their `needs:
+the file and bump lanes, and never claims an artifact it cannot verify. A typical heavy window costs
+≈5 000 turns against the 10 000 pool (dispatchers ~1 000; each gate 3 seats × ~250 on a first-round
+pass; appeals ~120; committers ~480). A pathological window where every gate burns its full seat
+budget through three feedback rounds exhausts the pool instead — a typed exit 3, the same escalation
+path as the token risk. `max-feedback: "0"` on the appellate seats is what makes their `needs:
 [<judge>]` legal — feedback may never target another judge.
 
 ```mermaid

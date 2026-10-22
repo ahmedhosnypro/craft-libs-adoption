@@ -21,8 +21,11 @@ steps:
       Execute PHASES 1 AND 1b of the mission (missions/adopt-libs.md) plus
       its run-start state read, as this step's contract:
 
-      - Window in bash: `date -u -d '{{arg.window}} ago' +%Y-%m-%dT%H:%M:%SZ`
-        (the arg is the look-back string; "7h" on the 6h cadence).
+      - Window in bash: `date -u -d '7 hours ago' +%Y-%m-%dT%H:%M:%SZ`
+        (the 7-hour look-back on the 6h cadence, matching the mission's
+        Phase 1. The plan's `window` arg ("7h") is the same look-back in
+        the helper's duration syntax — use it for `craft-helpers --since`
+        only; never feed it to `date`).
       - PHASE 1 — collect the window yourself, ONE bash turn: loop every
         repo in config/repo-list.txt paging `gh api --method GET
         "repos/<owner/name>/pulls?state=closed&sort=updated&direction=desc&per_page=100"`
@@ -69,7 +72,7 @@ steps:
         newest-first, dense numbering from batch-01; a failed batch keeps
         its number as batch-<NN>-retry and gaps are EXCEPTIONS.
       - Capacity-grouped dispatch, ALL groups in ONE turn: group the
-        batches so every group's `sum(1 + PRs per batch) ≤ 128` (the
+        batches so every group's `sum(1 + PRs per batch) ≤ 1024` (the
         concurrency knob), then fire every group's call in the same
         turn — one `spawn_agents` call for 2–32 batches per group
         (profile merge-classifier; every member maxTurns 10000,
@@ -91,7 +94,7 @@ steps:
       - WAVE SIZING: this workflow's only token ceiling is its
         max-total-tokens pool (no per-step cap) — size groups so the
         concurrent children's expected usage fits inside it under the
-        128-concurrency knob.
+        1024-concurrency knob.
       - Verify on return: every batch report and verdict file exists, the
         verdict count equals the batch size, and two verdicts per group
         are spot-checked against the live file lists and patches.
@@ -103,7 +106,7 @@ steps:
     agent: verdict-judge
     kind: judge
     needs: [classify]
-    max-turns: "60"
+    max-turns: "250"
     retry: "1"
     on-failure: stop
     deny-write: ["**"]
@@ -142,7 +145,7 @@ steps:
     agent: appellate-judge
     kind: judge
     needs: [classify-gate]
-    max-turns: "45"
+    max-turns: "120"
     retry: "1"
     on-failure: stop
     deny-write: ["**"]
@@ -187,10 +190,10 @@ steps:
       - THE SPLIT RULE: one filer item per crate family/role — never an
         unsplit multi-family payload; over-cap splits stay deferred in
         the state body.
-      - Dispatch: `spawn_agents` profile finding-filer, one finding per
-        item (≤3), every member maxTurns 10000, timeoutSecs 0,
-        (one item → `spawn_agent`; never a one-item
-        call). Each item carries the finding's full shard:
+      - Dispatch: `spawn_agent` when there is one finding, else one
+        `spawn_agents` call (profile finding-filer, one finding per item,
+        ≤3) — never a one-item batch call. Every member maxTurns 10000,
+        timeoutSecs 0. Each item carries the finding's full shard:
         proposed crate name, boundary sketch, anchor numbers, evidence
         merges (owner/name#number), the window, the ledger path, the
         per-repo clone outcome lines from prepare, and for a promotion
@@ -209,7 +212,7 @@ steps:
     agent: verdict-judge
     kind: judge
     needs: [file-draft]
-    max-turns: "60"
+    max-turns: "250"
     retry: "1"
     on-failure: stop
     deny-write: ["**"]
@@ -252,7 +255,7 @@ steps:
     agent: appellate-judge
     kind: judge
     needs: [file-gate]
-    max-turns: "45"
+    max-turns: "120"
     retry: "1"
     on-failure: stop
     deny-write: ["**"]
@@ -311,10 +314,10 @@ steps:
       - If the scope-truth clone at sources/craft-libs/ is not verified,
         do not draft bumps against it: record the candidates as
         blocked/deferred and report the exception.
-      - Dispatch: `spawn_agents` profile revsync-applier, one candidate
-        per item (≤3), every member maxTurns 10000, timeoutSecs 0,
-        (one item → `spawn_agent`; never a one-item
-        call). Each item carries the app repo, the crate,
+      - Dispatch: `spawn_agent` when there is one candidate, else one
+        `spawn_agents` call (profile revsync-applier, one candidate per
+        item, ≤3) — never a one-item batch call. Every member maxTurns
+        10000, timeoutSecs 0. Each item carries the app repo, the crate,
         the target HEAD and short rev (the verified sources/craft-libs/
         rev), the evidence compare range, the branch-name dedupe key,
         and the ledger path.
@@ -333,7 +336,7 @@ steps:
     agent: verdict-judge
     kind: judge
     needs: [bump-draft]
-    max-turns: "60"
+    max-turns: "250"
     retry: "1"
     on-failure: stop
     deny-write: ["**"]
@@ -367,7 +370,7 @@ steps:
     agent: appellate-judge
     kind: judge
     needs: [bump-gate]
-    max-turns: "45"
+    max-turns: "120"
     retry: "1"
     on-failure: stop
     deny-write: ["**"]
@@ -447,7 +450,7 @@ steps:
     agent: verdict-judge
     kind: judge
     needs: [rollup-draft]
-    max-turns: "60"
+    max-turns: "250"
     retry: "1"
     on-failure: stop
     deny-write: ["**"]
@@ -490,7 +493,7 @@ steps:
     agent: appellate-judge
     kind: judge
     needs: [rollup-gate]
-    max-turns: "45"
+    max-turns: "120"
     retry: "1"
     on-failure: stop
     deny-write: ["**"]
