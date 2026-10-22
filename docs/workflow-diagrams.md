@@ -64,7 +64,7 @@ flowchart TD
     P1 --> P1b["Phase 1b — Clone the sources<br/>17 repos + storytold/craft-libs scope-truth"]
     P1b --> Zero{"Any merges in window?"}
     Zero -->|Yes| P2["Phase 2 — Classify<br/>batches of ≤6 PRs, one repo each, newest-first"]
-    P2 --> Groups["All groups dispatched in ONE turn<br/>each group's sum(1 + PRs per batch) ≤ 128"]
+    P2 --> Groups["All groups dispatched in ONE turn<br/>each group's sum(1 + PRs per batch) ≤ 1024"]
     Groups --> P3["Phase 3 — File findings + pin bumps<br/>≤3 filers, ≤3 appliers, one turn"]
     Zero -->|No| P3
     P3 --> Stop{"Turn 180 stop rule"}
@@ -224,10 +224,10 @@ timeline
 
 ## 9. The subagent budget
 
-At most 256 subagents per run, at most 128 concurrent tree-wide. The reserve covers the 18 cloners,
+At most 1024 subagents per run, at most 1024 concurrent tree-wide. The reserve covers the 18 cloners,
 up to 6 filers/appliers, the rollup child, and retries; the rest is classifier coordinators and
-per-PR grandchildren. Beyond the cap the run classifies newest-first and reports the unclassified
-count as an exception.
+per-PR grandchildren, and their token budgets are unlimited (only the run's own budget guards).
+Beyond the cap the run classifies newest-first and reports the unclassified count as an exception.
 
 **Rollback-path note:** this pie is mission mode's pool. Under the judged workflow the engine
 sequences the 16 steps itself (`max-concurrent-steps: "4"`) and each dispatcher step still spawns
@@ -235,7 +235,7 @@ its own specialist groups, bounded instead by the run's `max-total-turns: "10000
 `max-total-tokens: "100000000"` pool.
 
 ```mermaid
-pie showData title Subagents within the 256-per-run cap
+pie showData title Subagents within the 1024-per-run cap
     "Cloners — 17 repos + storytold/craft-libs" : 18
     "Classifier coordinators + per-PR grandchildren" : 210
     "Filers + appliers" : 6
