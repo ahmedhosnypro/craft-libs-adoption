@@ -148,7 +148,7 @@ steps:
     agent: appellate-judge
     kind: judge
     needs: [classify-gate]
-    max-turns: "120"
+    max-turns: "200"
     retry: "1"
     on-failure: stop
     deny-write: ["**"]
@@ -158,12 +158,15 @@ steps:
       merge: unanimous
       max-feedback: "0"
     body: |
-      Re-derive the classify-gate rubric yourself (real files, counts
-      equal, live spot-checks, clones match, digest exists) — read the
-      artifacts and re-verify live, GET-only. Do not count votes: a
-      panel verdict you cannot reproduce from evidence is overturned,
-      and a unanimous panel of thin verdicts is exactly what you exist
-      to catch. Requests outside the rubric are not grounds for failure.
+      Re-derive the classify-gate rubric yourself — real files, counts
+      equal, live spot-checks, clones match, digest exists — read the
+      artifacts and re-verify live, GET-only, under THE JUDGE ECONOMY
+      LAW above: counting is one bash pass, live re-verification samples
+      at most two PRs, and 40 tool calls is your budget. Do not count
+      votes: a panel verdict you cannot reproduce from evidence is
+      overturned, and a unanimous panel of thin verdicts is exactly what
+      you exist to catch. Requests outside the rubric are not grounds
+      for failure.
 
       Return the verdict JSON: {"verdict":"pass"|"fail","issues":["..."]}.
 
@@ -260,7 +263,7 @@ steps:
     agent: appellate-judge
     kind: judge
     needs: [file-gate]
-    max-turns: "120"
+    max-turns: "200"
     retry: "1"
     on-failure: stop
     deny-write: ["**"]
@@ -272,9 +275,11 @@ steps:
     body: |
       Re-derive the file-gate rubric yourself — resolved merges,
       duplication proven or marked, scope policy read, anchors resolved
-      (closed never primary), boundary contract, one validated diagram.
-      Re-verify live, GET-only; do not count votes; a prior verdict you
-      cannot reproduce from evidence is overturned.
+      (closed never primary), boundary contract, one validated diagram —
+      under THE JUDGE ECONOMY LAW above: counting is one bash pass, live
+      re-verification samples, 40 tool calls is your budget. Re-verify
+      live, GET-only; do not count votes; a prior verdict you cannot
+      reproduce from evidence is overturned.
 
       Return the verdict JSON: {"verdict":"pass"|"fail","issues":["..."]}.
 
@@ -375,7 +380,7 @@ steps:
     agent: appellate-judge
     kind: judge
     needs: [bump-gate]
-    max-turns: "120"
+    max-turns: "200"
     retry: "1"
     on-failure: stop
     deny-write: ["**"]
@@ -386,9 +391,11 @@ steps:
       max-feedback: "0"
     body: |
       Re-derive the bump-gate rubric yourself — pin lines only, target
-      rev real, drift row real, no writes executed — re-verifying each
-      live, GET-only. Do not count votes; reproduce the ruling from
-      evidence or overturn it.
+      rev real, drift row real, no writes executed — under THE JUDGE
+      ECONOMY LAW above: counting is one bash pass, live re-verification
+      samples, 40 tool calls is your budget. Re-verify each live,
+      GET-only; do not count votes; reproduce the ruling from evidence
+      or overturn it.
 
       Return the verdict JSON: {"verdict":"pass"|"fail","issues":["..."]}.
 
@@ -498,7 +505,7 @@ steps:
     agent: appellate-judge
     kind: judge
     needs: [rollup-gate]
-    max-turns: "120"
+    max-turns: "200"
     retry: "1"
     on-failure: stop
     deny-write: ["**"]
@@ -510,7 +517,10 @@ steps:
     body: |
       Re-derive the rollup-gate rubric yourself — every row verified by
       number, exceptions named, comment shape, rotation honored, state
-      integrity. Re-verify live, GET-only; do not count votes.
+      integrity — under THE JUDGE ECONOMY LAW above: counting is one
+      bash pass, live re-verification samples at most three rows, 40
+      tool calls is your budget. Re-verify live, GET-only; do not count
+      votes.
 
       Return the verdict JSON: {"verdict":"pass"|"fail","issues":["..."]}.
 
