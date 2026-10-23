@@ -120,21 +120,24 @@ steps:
 
       1. REAL FILES: every batch report the classify step names exists
          under run-ledger/classifier/, and every pr-<number>.verdict for
-         the named merges exists as a file — count them.
+         the named merges exists as a file. Count with ONE bash pass —
+         `find`/`wc`/`grep -c` over run-ledger/classifier/ — never by
+         reading the files one by one.
       2. COUNTS EQUAL: each batch report's verdict count equals that
-         batch's size; the per-class counts the step reports match the
-         files.
-      3. LIVE SPOT-CHECKS: pick two verdicts whose class is hoist or
-         port and re-verify them live, read-only — the changed-file list
-         (`gh api .../pulls/<n>/files`) and the patch for the files the
-         verdict cites (`gh api` GET only); the PR resolves
-         state=closed merged=true. Read the verdict's `files evidence`
-         against the live list.
+         batch's size; the per-class counts the step reports match a
+         single `grep -c` per class. Arithmetic, not reading.
+      3. LIVE SPOT-CHECKS (at most three PRs): pick two `hoist` and one
+         `port` verdict and re-verify them live, read-only — the
+         changed-file list (`gh api .../pulls/<n>/files`) and the patch
+         for the files the verdict cites (`gh api` GET only); the PR
+         resolves state=closed merged=true. Read the verdict's `files
+         evidence` against the live list. Three PRs, not thirty.
       4. CLONES MATCH: the prepare step's clone outcome lines match
          sources/ — each clone-ok directory is populated and its HEAD
-         resolves; degraded/blocked repos appear as exceptions.
+         resolves; degraded/blocked repos appear as exceptions. One
+         loop in bash over the outcome lines, not a per-repo audit.
       5. THE DIGEST EXISTS: the prepare step's maintainer-verdict digest
-         is recorded, not just claimed.
+         is recorded, not just claimed. One read of the digest file.
 
       Return the verdict JSON: {"verdict":"pass"|"fail","issues":["..."]} —
       your final message must be that JSON and NOTHING else: no prose,
@@ -228,7 +231,9 @@ steps:
       1. RESOLVED MERGES: every evidence merge a draft cites resolves
          live (`gh api repos/<owner>/<name>/pulls/<n>` — closed and
          merged=true) and its file list exists. An unresolved merge is a
-         hallucination: fail.
+         hallucination: fail. The drafts are capped at three, so every
+         merge across all of them is at most a dozen reads — resolve
+         them all; do not sample the merge set.
       2. DUPLICATION PROVEN OR MARKED: every claimed consumer names a
          real `sources/<app>/<path>` plus a PR or pin ref, from a
          clone-ok repo, or the word `unverified`. No blanket sentence,
@@ -566,3 +571,24 @@ path this workflow does not delete.
 - A child that returns without its deliverable is re-spawned once with a
   narrowed prompt, keeping the original caps; after a second failure the
   gap becomes an exception. Never redo a completed child's work yourself.
+- THE JUDGE ECONOMY LAW (every judge step obeys it): a gate settles in
+  minutes or it has failed. Counting is ARITHMETIC — one bash pass of
+  `find`/`wc`/`grep -c` over the ledger, never reading files one by one.
+  Live re-verification is SAMPLED — at most three GitHub reads (a
+  changed-file list, a patch, a state resolution) across the whole
+  rubric, on the artifacts whose class carries the most risk. A judge
+  that exhausts a rubric by enumeration has not judged it harder: it has
+  spent the run's wall clock on the cheapest part of its job. Budget
+  yourself 40 tool calls; if the rubric still needs more, the artifacts
+  are not evidenced and the honest verdict is `fail` with the gap named.
+- THE SPAWN CALL SHAPE LAW (exact, never invented — the schema rejects
+  anything else): the profile's key is `agent`, never `profile`. The
+  batch call is `{"agent": "<profile-name>", "promptTemplate":
+  "<...>{{item}}<...>", "items": ["<...>", ...], "maxTurns": 10000,
+  "timeoutSecs": 0}` — `promptTemplate` must carry the literal
+  `{{item}}` placeholder, and each `items` entry fills it. The single
+  call is `{"agent": "<profile-name>", "prompt": "<the whole prompt>",
+  "maxTurns": 10000, "timeoutSecs": 0}`. A rejected call (missing
+  `promptTemplate`, no `{{item}}`, wrong key) means fix the call shape
+  on the next turn — never re-send the same broken shape, and never
+  fall back to doing a child's work yourself.
