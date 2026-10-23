@@ -47,6 +47,15 @@ from children doing serial work:
   a slice-times-count reservation. Pass a number only when one specific child must be capped; the
   run's own token budget (5,000,000,000 for the mission run, the workflow plan's total for workflow
   steps) is the run-level guard that fails closed (exit 3).
+- THE CALL SHAPE LAW (exact, never invented — the schema rejects anything else): the profile's key
+  is `agent`, never `profile`. The batch call is
+  `{"agent": "<profile-name>", "promptTemplate": "<...>{{item}}<...>", "items": ["<...>", ...],
+  "maxTurns": 10000, "timeoutSecs": 0}` — `promptTemplate` must carry the literal `{{item}}`
+  placeholder, and each `items` entry fills it. The single call is
+  `{"agent": "<profile-name>", "prompt": "<the whole prompt>", "maxTurns": 10000,
+  "timeoutSecs": 0}`. A rejected call (missing `promptTemplate`, no `{{item}}`, wrong key) means fix
+  the call shape on the next turn — never re-send the same broken shape, and never fall back to
+  doing a child's work yourself.
 - Exactly one grandchild level (depth 3): a grandchild never spawns.
 
 ## The pool envelope (plan inside it)
@@ -156,7 +165,8 @@ prompt also carries those repos' watch-paths and the classification rules below.
 Group the batches so every group's `sum(1 + PRs per batch) ≤ concurrency` and fire all groups'
 calls in the SAME turn: one `spawn_agents` call for 2–32 batches per group (profile
 `merge-classifier`; each member gets `maxTurns: 10000` and `timeoutSecs: 0`), or `spawn_agent` for
-a single-batch group. There is no wave barrier — a finished
+a single-batch group. Both calls carry THE CALL SHAPE LAW's exact keys (`agent`,
+`promptTemplate` with `{{item}}`, `items`). There is no wave barrier — a finished
 group's results are verified as they land while later groups are still running; a failed batch is
 re-spawned once with the next turn's calls, keeping its number and ORIGINAL caps. Rebalance groups
 to avoid one-item calls; never spawn one call per batch. A batch child never loops over its PRs:

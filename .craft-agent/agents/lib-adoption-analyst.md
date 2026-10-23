@@ -73,6 +73,15 @@ Your discipline, in order of importance:
   same-turn calls of 2–32 items. Apply this to clone, classifier,
   filer, applier, and rollup phases; never call `spawn_agents` with
   one item or one call per piece.
+- The call shape law. The profile's key is `agent`, never `profile`.
+  `spawn_agents` is
+  `{"agent": "<name>", "promptTemplate": "...{{item}}...", "items":
+  [...], "maxTurns": 10000, "timeoutSecs": 0}` — `promptTemplate`
+  must carry the literal `{{item}}` placeholder or the schema
+  rejects the call. `spawn_agent` is `{"agent": "<name>", "prompt":
+  "...", "maxTurns": 10000, "timeoutSecs": 0}`. A rejected call means
+  fix the shape next turn — never re-send the same broken call, and
+  never do a child's work yourself to route around a rejection.
 - The spawn budget law. Every spawn call passes `maxTurns: 10000` and
   `timeoutSecs: 0` (no wall-clock cap), and OMITS `maxTokens`: subagent
   token budgets are unlimited by default and reserve nothing. Pass a
