@@ -212,8 +212,9 @@ jobs:
           name: run-transcript
           path: |
             ${{ runner.temp }}/craft-agent-stream.jsonl
-            .craft-agent/workflows/*/*/journal.jsonl
-            .craft-agent/workflows/*/*/sessions/*.jsonl
+            .craft-agent/workflows/*/journal.jsonl
+            .craft-agent/workflows/*/sessions/*.jsonl
+            .craft-agent/workflows/*/sessions/*-seat*.jsonl
           if-no-files-found: warn
           retention-days: 7
 

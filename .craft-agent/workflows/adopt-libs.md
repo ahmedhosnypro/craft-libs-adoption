@@ -19,7 +19,12 @@ steps:
     outputs: [collection, clone-outcomes, verdict-digest, exceptions]
     body: |
       Execute PHASES 1 AND 1b of the mission (missions/adopt-libs.md) plus
-      its run-start state read, as this step's contract:
+      its run-start state read, as this step's contract. That contract
+      ENDS there: Phase 2 (sharding merges, classifying PRs) belongs to
+      the classify step, which needs this one. Do not shard PRs, build
+      batch items, or launch any merge-classifier child from here — that
+      work is the next step's, and doing it here parks this step inside
+      a wave whose results nothing awaits.
 
       - Window in bash: `date -u -d '7 hours ago' +%Y-%m-%dT%H:%M:%SZ`
         (the 7-hour look-back on the 6h cadence, matching the mission's
@@ -40,10 +45,13 @@ steps:
         one item per configured repo plus storytell/craft-libs
         (scope-truth, watch-paths AGENTS.md,Cargo.toml,crates,docs,licenses),
         item shape `<owner/repo>|<watch-paths csv>|<purpose>`, clone target
-        `sources/<repo-slug>/` (craft-libs → sources/craft-libs/). Verify
+        `sources/<repo-slug>/` (craft-libs → sources/craft-libs/). The
+        call passes `maxTurns: 10000` and `timeoutSecs: 1800` and omits
+        `maxTokens`. Verify
         every `clone-ok` yourself against the directory and watch paths;
         a wrong HEAD is degraded, never clone-ok. Degraded/blocked repos
-        are EXCEPTIONS and never supply duplication evidence.
+        are EXCEPTIONS and never supply duplication evidence; a child the
+        wall clock reclaims is one of those exceptions, never a hang.
       - Run-start state read: read the tracking issue's CURRENT Mission
         State body on ahmedhosnypro/craft-libs and build the
         MAINTAINER-VERDICT DIGEST (mission step 2): closed
@@ -76,7 +84,7 @@ steps:
         concurrency knob), then fire every group's call in the same
         turn — one `spawn_agents` call for 2–32 batches per group
         (profile merge-classifier; every member maxTurns 10000,
-        timeoutSecs 0), or `spawn_agent` for a
+        timeoutSecs 3600), or `spawn_agent` for a
         single-batch group. NO wave barrier: a finished group's verdict
         files are verified as they land while later groups still run; a
         failed batch re-spawns once with the next turn's calls (number
@@ -199,7 +207,7 @@ steps:
       - Dispatch: `spawn_agent` when there is one finding, else one
         `spawn_agents` call (profile finding-filer, one finding per item,
         ≤3) — never a one-item batch call. Every member maxTurns 10000,
-        timeoutSecs 0. Each item carries the finding's full shard:
+        timeoutSecs 1800. Each item carries the finding's full shard:
         proposed crate name, boundary sketch, anchor numbers, evidence
         merges (owner/name#number), the window, the ledger path, the
         per-repo clone outcome lines from prepare, and for a promotion
@@ -327,7 +335,7 @@ steps:
       - Dispatch: `spawn_agent` when there is one candidate, else one
         `spawn_agents` call (profile revsync-applier, one candidate per
         item, ≤3) — never a one-item batch call. Every member maxTurns
-        10000, timeoutSecs 0. Each item carries the app repo, the crate,
+        10000, timeoutSecs 1800. Each item carries the app repo, the crate,
         the target HEAD and short rev (the verified sources/craft-libs/
         rev), the evidence compare range, the branch-name dedupe key,
         and the ledger path.
@@ -446,7 +454,7 @@ steps:
         reason (exceptions — named, never silent).
       - Dispatch once: `spawn_agent` profile rollup-writer (single
         deliverable, so the single-child tool), maxTurns 10000,
-        timeoutSecs 0, the prompt carrying the full
+        timeoutSecs 1800, the prompt carrying the full
         snapshot and the prior Mission State body. Its profile is its
         contract: it composes `run-ledger/rollup/state-body.md`,
         `run-ledger/rollup/comment.md`, and `run-ledger/rollup/target.md`
@@ -595,10 +603,18 @@ path this workflow does not delete.
   anything else): the profile's key is `agent`, never `profile`. The
   batch call is `{"agent": "<profile-name>", "promptTemplate":
   "<...>{{item}}<...>", "items": ["<...>", ...], "maxTurns": 10000,
-  "timeoutSecs": 0}` — `promptTemplate` must carry the literal
+  "timeoutSecs": 1800}` — `promptTemplate` must carry the literal
   `{{item}}` placeholder, and each `items` entry fills it. The single
   call is `{"agent": "<profile-name>", "prompt": "<the whole prompt>",
-  "maxTurns": 10000, "timeoutSecs": 0}`. A rejected call (missing
+  "maxTurns": 10000, "timeoutSecs": 1800}`. A rejected call (missing
   `promptTemplate`, no `{{item}}`, wrong key) means fix the call shape
   on the next turn — never re-send the same broken shape, and never
   fall back to doing a child's work yourself.
+- THE WALL-CLOCK LAW (never `timeoutSecs: 0`): every spawn call carries
+  a finite `timeoutSecs` — 1800 for a clone/filer/applier/rollup child,
+  3600 for a classifier wave and its grandchildren, because those are
+  the long ones. Token budgets stay UNLIMITED (omitted `maxTokens`),
+  but a child without a wall clock can hang the tool call that awaits
+  it — and `subagent_started` events drain only after the batch
+  returns, so a stuck child silences the stream and the step with it.
+  The clock reclaiming a child is a named exception, not a lost run.

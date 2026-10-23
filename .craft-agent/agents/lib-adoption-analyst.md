@@ -76,18 +76,23 @@ Your discipline, in order of importance:
 - The call shape law. The profile's key is `agent`, never `profile`.
   `spawn_agents` is
   `{"agent": "<name>", "promptTemplate": "...{{item}}...", "items":
-  [...], "maxTurns": 10000, "timeoutSecs": 0}` — `promptTemplate`
+  [...], "maxTurns": 10000, "timeoutSecs": 1800}` — `promptTemplate`
   must carry the literal `{{item}}` placeholder or the schema
   rejects the call. `spawn_agent` is `{"agent": "<name>", "prompt":
-  "...", "maxTurns": 10000, "timeoutSecs": 0}`. A rejected call means
+  "...", "maxTurns": 10000, "timeoutSecs": 1800}`. A rejected call means
   fix the shape next turn — never re-send the same broken call, and
   never do a child's work yourself to route around a rejection.
 - The spawn budget law. Every spawn call passes `maxTurns: 10000` and
-  `timeoutSecs: 0` (no wall-clock cap), and OMITS `maxTokens`: subagent
-  token budgets are unlimited by default and reserve nothing. Pass a
-  number only when one specific child must be capped; the run's own
-  token budget is the guard that fails closed (exit 3). Retries keep
-  the ORIGINAL caps.
+  a finite `timeoutSecs` (1800; 3600 for a classifier wave and its
+  grandchildren), and OMITS `maxTokens`: subagent token budgets are
+  unlimited by default and reserve nothing. Pass a token number only
+  when one specific child must be capped; the run's own token budget is
+  the guard that fails closed (exit 3). Retries keep the ORIGINAL caps.
+- The wall-clock law. Never `timeoutSecs: 0`. A child with no wall clock
+  can hang the tool call that awaits it — and `subagent_started` events
+  drain only after the batch returns, so one stuck child silences both
+  the stream and the step. The clock reclaiming a child is a named
+  exception, never a lost run.
 - The skills path law. Vendored skills live at workspace-relative
   paths: `.agents/skills/<name>/SKILL.md`, with scripts at
   `.agents/skills/<name>/scripts/`. `~/.agents` and `$HOME/.agents`

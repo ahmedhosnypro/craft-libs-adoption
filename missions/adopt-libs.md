@@ -41,12 +41,18 @@ from children doing serial work:
   turns are free, scope is not.
 
 - THE SPAWN BUDGET LAW — pass `maxTurns: 10000` (the tool ceiling; effectively unbounded — the
-  stationarity guard, not turn counts, is the loop-safety bound) and `timeoutSecs: 0` (no wall-clock
-  cap; children work freely until done) on EVERY spawn call, and OMIT `maxTokens`: subagent token
+  stationarity guard, not turn counts, is the loop-safety bound) on EVERY spawn call and OMIT
+  `maxTokens`: subagent token
   budgets are UNLIMITED by default and reserve nothing, so a group's admission no longer depends on
   a slice-times-count reservation. Pass a number only when one specific child must be capped; the
   run's own token budget (5,000,000,000 for the mission run, the workflow plan's total for workflow
   steps) is the run-level guard that fails closed (exit 3).
+- THE WALL-CLOCK LAW — never `timeoutSecs: 0`. Every spawn call carries a finite `timeoutSecs`
+  (1800 for a clone, filer, applier or rollup child; 3600 for a classifier wave and its
+  grandchildren). Token budgets stay unlimited; a wall clock is different: a child with no clock can
+  hang the tool call that awaits it, and `subagent_started` events drain only after the batch
+  returns, so one stuck child silences both the stream and the step. The clock reclaiming a child is
+  a named exception, never a lost run.
 - THE CALL SHAPE LAW (exact, never invented — the schema rejects anything else): the profile's key
   is `agent`, never `profile`. The batch call is
   `{"agent": "<profile-name>", "promptTemplate": "<...>{{item}}<...>", "items": ["<...>", ...],
@@ -128,7 +134,7 @@ zero merges, because duplication is proven across the suite, not across the wind
 for scope-truth). If the list grows beyond 32 items, split into calls of 2–32 items, rebalancing so
 no call has one item; if the combined active calls would exceed the concurrency knob, split the
 clones into sequential capacity-safe waves.
-Each member receives `maxTurns: 10000`, `timeoutSecs: 0`, and . Item shape:
+Each member receives `maxTurns: 10000`, `timeoutSecs: 1800`, and no `maxTokens`. Item shape:
 `<owner/repo>|<watch-paths csv>|<purpose>` where purpose is `scan-source`, or `scope-truth` for
 craft-libs (its watch-paths are `AGENTS.md,Cargo.toml,crates,docs,licenses` — the root `Cargo.toml`
 carries the real `[workspace.dependencies]` `craft-` list that the filer's crate-name gate reads;
@@ -164,7 +170,7 @@ prompt also carries those repos' watch-paths and the classification rules below.
 
 Group the batches so every group's `sum(1 + PRs per batch) ≤ concurrency` and fire all groups'
 calls in the SAME turn: one `spawn_agents` call for 2–32 batches per group (profile
-`merge-classifier`; each member gets `maxTurns: 10000` and `timeoutSecs: 0`), or `spawn_agent` for
+`merge-classifier`; each member gets `maxTurns: 10000` and `timeoutSecs: 3600`), or `spawn_agent` for
 a single-batch group. Both calls carry THE CALL SHAPE LAW's exact keys (`agent`,
 `promptTemplate` with `{{item}}`, `items`). There is no wave barrier — a finished
 group's results are verified as they land while later groups are still running; a failed batch is
@@ -172,7 +178,7 @@ re-spawned once with the next turn's calls, keeping its number and ORIGINAL caps
 to avoid one-item calls; never spawn one call per batch. A batch child never loops over its PRs:
 turn 1 claims its ledger and splits the batch into per-PR grandchild prompts (repo, number, title,
 merged-at, that repo's watch-paths, and the verdict contract inline); turn 2 fires ONE spawn_agents
-call — one item per PR, same profile, `maxTurns: 10000`, `timeoutSecs: 0`, 
+call — one item per PR, same profile, `maxTurns: 10000`, `timeoutSecs: 3600`, 
 per grandchild — while a one-PR batch is classified directly instead; turn 3 verifies the verdict
 files and writes the batch report; turn 4 closes.
 
@@ -245,7 +251,7 @@ Fire the calls in the SAME turn:
   one call per item.
 
 - `spawn_agents`, profile `finding-filer`, one finding per item (≤3), `maxTurns: 10000`,
-  `timeoutSecs: 0`, . Each item ALSO carries that finding's shard contents: the
+  `timeoutSecs: 1800`, no `maxTokens`. Each item ALSO carries that finding's shard contents: the
   proposed crate name (`craft-<name>` for a hoist; the existing craft-libs crate for a port), a
   boundary sketch (one line per returns / apps keep / not in scope), and any known upstream anchor
   numbers (from the pipeline row or the verdict digest lines). The filer VERIFIES these against the
@@ -289,7 +295,7 @@ Fire the calls in the SAME turn:
   already exists, the filer verifies it and returns `already-filed` — no second issue, no comment.
 
 - `spawn_agents`, profile `revsync-applier`, one candidate per item (≤3), `maxTurns: 10000`,
-  `timeoutSecs: 0`, . The template carries the target HEAD (the verified
+  `timeoutSecs: 1800`, no `maxTokens`. The template carries the target HEAD (the verified
 `sources/craft-libs/` rev), the branch-name dedupe key, the scratch-clone mechanics, pin-lines-only,
 and the law: any denial (write gate, 403, protected branch) is recorded as a blocker — never a
 crash, never a retry. If the scope-truth clone is not verified, do not open pin bumps against it;
@@ -306,7 +312,7 @@ does not carry fails the phase like any other unverifiable claim.
 
 ## Phase 4 — Deliver: one spawn_agent call
 
-Profile `rollup-writer`, `maxTurns: 10000`, `timeoutSecs: 0`, . The prompt
+Profile `rollup-writer`, `maxTurns: 10000`, `timeoutSecs: 1800`, no `maxTokens`. The prompt
 carries the state snapshot you composed: the previous Mission State body, this window's drift rows
 (from applier outcomes), maturing candidates with window IDs, last-seen window, consecutive-window
 streak and corroboration counts, every verified artifact by number, `already-tracked` findings with
