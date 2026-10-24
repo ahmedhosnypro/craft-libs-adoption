@@ -8,7 +8,8 @@ artifact. One diagram per concept; nothing here invents entities.
 Two modes are drawn here. **Mission mode** (sections 1–9) is today's CI default and the rollback
 path: `lib-adoption-analyst` drives the phases itself and the specialists write to GitHub directly.
 **Workflow mode** (sections 10–12) is the judged DAG in `.craft-agent/workflows/adopt-libs.md` —
-16 steps gating every GitHub write behind a panel and an appellate verdict. Mission mode is the
+10 steps gating every GitHub write behind a panel and an appellate verdict, and running one pipeline
+per PR. Mission mode is the
 current reality; workflow mode is what the same run becomes, so where the two conflict the
 mission-mode sections describe the rollback path, not the destination.
 
@@ -54,21 +55,22 @@ flowchart TD
 
 **Mission mode — the rollback path.** The orchestrator `lib-adoption-analyst` computes the window
 itself (`date -u -d '7 hours ago'` — a 7-hour look-back on the 6-hour cadence), reads the tracking
-issue's Mission State body and the maintainer-verdict digest, then drives the five phases. Zero
+issue's Mission State body and the maintainer-verdict digest, then drives the phases. Zero
 merges skips classification; the clones still run because duplication is proven across the suite,
-not across the window.
+not across the window. Phase 1, Phase 1b, and the digest read are scripts started by
+`scripts/launch-sweeps.sh` in one call, running concurrently — the AI never collects or clones.
 
-Under the judged workflow (section 10) the same phases become steps: `prepare` runs Phase 1 + Phase
-1b plus verification, `classify` runs Phase 2, and the specialists no longer write to GitHub at all.
+Under the judged workflow (section 10) the same phases become steps: `prepare` launches and verifies
+the sweeps, `pr-pipeline` runs Phase 2 as one pipeline per PR, and the specialists no longer write to
+GitHub at all.
 
 ```mermaid
 flowchart TD
-    Init["Run start: window, Mission State,<br/>maintainer-verdict digest, mission.db"] --> P1["Phase 1 — Collect the window<br/>REST sweep over 17 repos + craft-helpers cross-check"]
-    P1 --> P1b["Phase 1b — Clone the sources<br/>17 repos + storytold/craft-libs scope-truth"]
-    P1b --> Zero{"Any merges in window?"}
-    Zero -->|Yes| P2["Phase 2 — Classify<br/>batches of ≤6 PRs, one repo each, newest-first"]
-    P2 --> Groups["All groups dispatched in ONE turn<br/>each group's sum(1 + PRs per batch) ≤ 1024"]
-    Groups --> P3["Phase 3 — File findings + pin bumps<br/>≤3 filers, ≤3 appliers, one turn"]
+    Init["Run start: window, Mission State,<br/>maintainer-verdict digest, mission.db"] --> Sweep["scripts/launch-sweeps.sh — ONE call<br/>collection + clone sweep + digest read, concurrent"]
+    Sweep --> Zero{"Any merges in window?"}
+    Zero -->|Yes| P2["Phase 2 — Classify<br/>one DETACHED child per PR, every group in one turn"]
+    P2 --> Poll["poll_agents as each verdict lands —<br/>that PR advances to its stage-2 child immediately"]
+    Poll --> P3["Phase 3 — File findings + pin bumps<br/>≤3 findings, ≤3 bumps, per PR as it advances"]
     Zero -->|No| P3
     P3 --> Stop{"Turn 180 stop rule"}
     Stop --> P4["Phase 4 — Deliver<br/>rollup-writer spawn_agent"]
@@ -78,9 +80,9 @@ flowchart TD
 
 ## 3. The run as a sequence
 
-The orchestrator never classifies, files, or delivers itself; each phase is a capacity-grouped set of
-specialist children fired in one turn, and every child deliverable is verified against `gh api` as
-its group's results land — no wave barrier between groups.
+The orchestrator never classifies, files, or delivers itself; the sweep is a script, every PR is its
+own detached child, and each PR advances to its stage-2 child the moment its verdict is verified —
+no wave barrier between PRs, and no PR waiting on another.
 
 **Rollback-path note:** the arrows below are mission mode. Under the judged workflow the filer,
 applier, and rollup children only produce drafts in `run-ledger/`; the writes shown here move to
@@ -89,21 +91,20 @@ the committers behind the gates of section 11.
 ```mermaid
 sequenceDiagram
     participant O as lib-adoption-analyst
-    participant C as source-cloner
+    participant S as scripts/launch-sweeps.sh
     participant M as merge-classifier
-    participant G as per-PR grandchild
     participant F as finding-filer
     participant A as revsync-applier
     participant R as rollup-writer
     O->>O: Compute window, read Mission State, build verdict digest
-    O->>C: spawn_agents — 18 clone items (scan-source, scope-truth)
-    C-->>O: clone-ok / clone-degraded / clone-blocked per repo
-    O->>M: spawn_agents — all groups' calls in one turn (≤32 batches per call, capacity-grouped)
-    M->>G: spawn_agents — one item per PR in the batch
-    G-->>M: pr-<number>.verdict line
-    M-->>O: batch report (verdict count equals batch size)
-    O->>F: spawn_agents — ≤3 finding items (same turn)
-    O->>A: spawn_agents — ≤3 bump candidates (same turn)
+    O->>S: launch — collection, clone sweep, digest (concurrent)
+    S-->>O: rows.jsonl, clone-outcomes.txt, digest.md
+    O->>M: spawn_agents DETACHED — one item per PR, all groups in one turn
+    M-->>O: accepted ids (immediate, no await)
+    O->>O: poll_agents waitSecs 120 — collect as verdicts land
+    M-->>O: pr-<number>.verdict line per PR
+    O->>F: spawn_agent for THIS PR's hoist/port verdict (detached)
+    O->>A: spawn_agent for THIS PR's rev-sync verdict (detached)
     F-->>O: issue filed as adoption-scan: <slug>
     A-->>O: pin-bump PR or recorded blocker
     O->>R: spawn_agent — composed state snapshot
@@ -112,40 +113,40 @@ sequenceDiagram
 
 ## 4. The subagent tree
 
-Depth 3 by design and never deeper: coordinators may spawn grandchildren, grandchildren never
-spawn. Every spawn carries `maxTurns: 10000`, `timeoutSecs: 0`, `maxTokens: 75000000` — omitting
-`maxTokens` starves later groups of the run's 5,000,000,000-token budget.
+Depth 2 by design and never deeper: the orchestrator spawns children, and a per-PR child never
+spawns — the coordinator layer is gone. Every spawn carries `maxTurns: 10000` and a finite
+`timeoutSecs` (1800, or 3600 for a classifier child) and omits `maxTokens`: subagent token budgets
+are unlimited and reserve nothing, so a group's admission never depends on a slice-times-count
+reservation.
 
 ```mermaid
 flowchart LR
-    O["lib-adoption-analyst<br/>depth 0"] --> C["source-cloner ×18<br/>depth 1"]
-    O --> M["merge-classifier<br/>depth 1, one per batch"]
-    M --> G["per-PR grandchild<br/>depth 2, one spawn_agents per batch"]
-    O --> F["finding-filer ×≤3<br/>depth 1"]
-    O --> A["revsync-applier ×≤3<br/>depth 1"]
+    O["lib-adoption-analyst<br/>depth 0"] --> M["merge-classifier<br/>depth 1, ONE per PR — never spawns"]
+    O --> F["finding-filer ×≤3<br/>depth 1, detached per advancing PR"]
+    O --> A["revsync-applier ×≤3<br/>depth 1, detached per advancing PR"]
     O --> R["rollup-writer ×1<br/>depth 1, spawn_agent"]
 ```
 
-## 5. Inside one classification batch
+## 5. Inside one classification pipeline
 
-A batch child never loops over its PRs. Its four moves — claim, spawn, verify and report, close —
-and the grandchildren's three describe the fastest honest path; turn counts are guidance, not caps.
-Batches across groups run concurrently; a coordinator sees only its own batch.
+A classifier child owns exactly ONE PR — no coordinator, no grandchild, because a coordinator is a
+barrier its members wait on and a grandchild adds a level the per-PR shape does not need. Its moves
+— claim, fetch, classify, verify — describe the fastest honest path; turn counts are guidance, not
+caps. Every child in the wave is independent: it shares nothing with any other child and waits on
+none.
 
 ```mermaid
 sequenceDiagram
-    participant Coord as merge-classifier batch child
-    participant Kid as per-PR grandchild
-    participant Ledger as run-ledger/classifier/batch-<NN>/
+    participant Kid as merge-classifier (one PR)
+    participant Ledger as run-ledger/classifier/pr-<number>/
     participant API as GitHub REST API
-    Coord->>Ledger: scope-claim batch-<NN>
-    Coord->>Coord: Split batch into per-PR prompts
-    Coord->>Kid: spawn_agents — one item per PR
-    Kid->>API: GET changed-file list + patch/diff
+    participant Clone as sources/<repo>/ (Phase 1b)
+    Kid->>Ledger: scope-claim pr-<number>
+    Kid->>API: GET changed-file list (paginate, per_page=100)
+    Kid->>API: GET patch/diff for watch-path files only
+    Kid->>Clone: suite context for duplication (never the PR's evidence)
     Kid->>Ledger: task row + pr-<number>.verdict
-    Kid-->>Coord: verdict line as final message
-    Coord->>Ledger: Verify verdict files, write batch report
-    Coord->>Ledger: scope-done
+    Kid-->>Kid: verdict line as the final message
 ```
 
 ## 6. A PR's verdict lifecycle
@@ -157,8 +158,8 @@ two consecutive windows, and only when the maintainer-verdict digest's revival c
 ```mermaid
 stateDiagram-v2
     [*] --> Collected: merged_at >= window start
-    Collected --> Batched: batch-NN, newest-first
-    Batched --> Fetched: changed-file list + patch
+    Collected --> Dispatched: one DETACHED child per PR, newest-first
+    Dispatched --> Fetched: changed-file list + patch
     Fetched --> Irrelevant: no watch-path intersect<br/>pin files always in scope
     Fetched --> Unverified: patch missing or truncated
     Fetched --> RevSync: craft-libs pin bump, old/new rev
@@ -227,155 +228,158 @@ timeline
 
 ## 9. The subagent budget
 
-At most 1024 subagents per run, at most 1024 concurrent tree-wide. The reserve covers the 18 cloners,
-up to 6 filers/appliers, the rollup child, and retries; the rest is classifier coordinators and
-per-PR grandchildren, and their token budgets are unlimited (only the run's own budget guards).
-Beyond the cap the run classifies newest-first and reports the unclassified count as an exception.
+At most 1024 subagents per run, and at most 48 concurrent tree-wide (the scan's knob is a
+deliberate bound, not a ceiling: each child is a full runner with its own context and provider
+stream, and the job's runner has 7 GB — the hub queues the rest FIFO, so the window's per-PR
+pipelines still all progress, just 48 at a time). The reserve covers the stage-2 filers and
+appliers, the rollup child, and retries; the rest is per-PR classifier children, and their token
+budgets are unlimited (only the run's own budget guards). Beyond the cap the run classifies
+newest-first and reports the unclassified count as an exception.
 
 **Rollback-path note:** this pie is mission mode's pool. Under the judged workflow the engine
-sequences the 16 steps itself (`max-concurrent-steps: "4"`) and each dispatcher step still spawns
-its own specialist groups, bounded instead by the run's `max-total-turns: "10000"` and
+sequences the 10 steps itself (`max-concurrent-steps: "4"`) and `pr-pipeline` dispatches its
+detached per-PR pool, bounded instead by the run's `max-total-turns: "10000"` and
 `max-total-tokens: "100000000"` pool.
 
 ```mermaid
 pie showData title Subagents within the 1024-per-run cap
-    "Cloners — 17 repos + storytold/craft-libs" : 18
-    "Classifier coordinators + per-PR grandchildren" : 210
+    "Per-PR classifier children (detached pool)" : 228
     "Filers + appliers" : 6
     "Rollup child + retry reserve" : 22
 ```
 
 ---
 
-## 10. The judged workflow — the 16-step DAG
+## 10. The judged workflow — the 10-step DAG, one pipeline per PR
 
 Workflow mode lives in `.craft-agent/workflows/adopt-libs.md` (frontmatter `name: adopt-libs`, arg
 `window` default `7h`) — the same scan, but the engine sequences the steps instead of the
-orchestrator, and every GitHub write sits behind a verdict. Limits: `max-steps: "16"` (the hard cap,
-so the DAG is exactly full — a new phase means a consolidation, not a 17th step),
+orchestrator, and every GitHub write sits behind a verdict. Limits: `max-steps: "12"`,
 `max-concurrent-steps: "4"`, `max-total-turns: "10000"`, `max-total-tokens: "100000000"`,
 `max-retries-per-step: "2"`. Every step states `max-turns`, `retry`, and `on-failure` explicitly —
 never relying on the 25/0/stop defaults.
 
-The shape: one shared spine (`prepare`, `classify`, `classify-gate`, `classify-appeal`) then three
-parallel islands that never touch each other — file (5–8), bump (9–12), rollup (13–16). Only
-success releases dependants, so what happens after a failure depends on that step's `on-failure`.
+The shape: a scripted parallel sweep (`prepare`), one per-PR pipeline step (`pr-pipeline`), one
+merged judge family (`pipeline-gate`, `pipeline-appeal`), two committers that need only the appeal
+(`file-commit`, `bump-commit`), and the rollup island (`rollup-draft`, `rollup-gate`,
+`rollup-appeal`, `rollup-commit`) that starts the moment `prepare` settles. Only success releases
+dependants, so what happens after a failure depends on that step's `on-failure`.
+
+What changed from the 16-step shape and why: `classify`, `file-draft`, and `bump-draft` collapsed
+into `pr-pipeline` because a per-PR pipeline is not a phase — every PR's journey is its own, and a
+PR may finish while another is only in its first stage. The gates merged for the same reason: one
+judge family verifies the whole per-PR output, exhaustive only on the ≤3 findings and ≤3 bumps that
+can actually be filed, sampled elsewhere.
 
 **Failure policy — schema-enforced, not a preference.** A step the run survives a failure of
 (`skip` or `warn`) must be a leaf: the workflow schema forbids `skip`/`warn` on a step that has
-dependants, or the pipeline stalls. So all 13 steps anything depends on are `stop`, and only the
-three leaf committers — nothing needs them — are `skip`. A gate that settles failed therefore halts
-admissions: the run ends `Failed` (exit 1 on a step error, 2 on max-turns, 3 on budget), its appeal
-and commit settle as skipped with a named `DependencyFailed` reason (journaled, never silent), and
+dependants, or the pipeline stalls. So every step anything depends on is `stop`, and only the three
+leaf committers — nothing needs them — are `skip`. A gate that settles failed therefore halts
+admissions: the run ends `Failed` (exit 1 on a step error, 2 on max-turns, 3 on budget), its
+committers settle as skipped with a named `DependencyFailed` reason (journaled, never silent), and
 the next run heals from the prior state body. A skipped *committer* still records the failure (the
 run is `Failed`), but in-flight sibling branches keep running, so their terminal rows reach the
 rollup's exception list — that is the audit trail for a failed lane.
 
 `rollup-draft` composes the snapshot from the terminal `run-ledger/outcomes/*.md` rows and the
 journal — skipped steps become named exceptions, never silence — with a bounded wait (≤45 min) for
-the file and bump lanes, and never claims an artifact it cannot verify. A typical heavy window costs
-≈5 000 turns against the 10 000 pool (dispatchers ~1 000; each gate 3 seats × ~250 on a first-round
-pass; appeals ~120; committers ~480). A pathological window where every gate burns its full seat
-budget through three feedback rounds exhausts the pool instead — a typed exit 3, the same escalation
-path as the token risk. `max-feedback: "0"` on the appellate seats is what makes their `needs:
-[<judge>]` legal — feedback may never target another judge.
+the file and bump lanes, and never claims an artifact it cannot verify. `pr-pipeline` carries the
+heaviest budget (1200 turns): one detached child per PR, then polls as each verdict lands and
+advances that PR immediately, so a `rev-sync` PR gets its applier while a `hoist` PR three hundred
+rows down is still fetching files.
 
 ```mermaid
 flowchart TD
-    P["1 prepare — lib-adoption-analyst<br/>window sweep + Phase 1b clone wave + verdict digest"] --> C["2 classify — lib-adoption-analyst<br/>Phase 2 groups, capacity-grouped, one turn"]
-    C --> CG{"3 classify-gate<br/>verdict-judge, panel 3, majority"}
-    CG -->|pass| CA{"4 classify-appeal<br/>appellate-judge, panel 1, unanimous"}
+    P["1 prepare — lib-adoption-analyst<br/>scripts/launch-sweeps.sh: collection, clone sweep,<br/>verdict-digest read — all concurrent"] --> Q["2 pr-pipeline — lib-adoption-analyst<br/>one DETACHED child per PR; poll_agents as each verdict lands;<br/>that PR advances to its stage-2 child immediately"]
+    Q --> PG{"3 pipeline-gate<br/>verdict-judge, panel 3, majority"}
+    PG -->|pass| PA{"4 pipeline-appeal<br/>appellate-judge, panel 1, unanimous"}
 
-    subgraph file["file island — steps 5-8"]
+    subgraph writes["write lanes — need only the appeal"]
         direction TB
-        FD["5 file-draft — lib-adoption-analyst"] --> FG{"6 file-gate<br/>verdict-judge, panel 3, majority"}
-        FG -->|pass| FA{"7 file-appeal<br/>appellate-judge, panel 1, unanimous"}
-        FA -->|uphold| FC["8 file-commit — finding-committer"]
-        FG -.->|"fail: gate stops the run (skips below it, named)"| FC
+        FC["5 file-commit — finding-committer"]
+        BC["6 bump-commit — revsync-committer"]
     end
 
-    subgraph bump["bump island — steps 9-12"]
+    subgraph rollup["rollup island — steps 7-10"]
         direction TB
-        BD["9 bump-draft — lib-adoption-analyst"] --> BG{"10 bump-gate<br/>verdict-judge, panel 3, majority"}
-        BG -->|pass| BA{"11 bump-appeal<br/>appellate-judge, panel 1, unanimous"}
-        BA -->|uphold| BC["12 bump-commit — revsync-committer"]
-        BG -.->|"fail: gate stops the run (skips below it, named)"| BC
-    end
-
-    subgraph rollup["rollup island — steps 13-16"]
-        direction TB
-        RD["13 rollup-draft — lib-adoption-analyst"] --> RG{"14 rollup-gate<br/>verdict-judge, panel 3, majority"}
-        RG -->|pass| RA{"15 rollup-appeal<br/>appellate-judge, panel 1, unanimous"}
-        RA -->|uphold| RC["16 rollup-commit — rollup-committer"]
+        RD["7 rollup-draft — lib-adoption-analyst"] --> RG{"8 rollup-gate<br/>verdict-judge, panel 3, majority"}
+        RG -->|pass| RA{"9 rollup-appeal<br/>appellate-judge, panel 1, unanimous"}
+        RA -->|uphold| RC["10 rollup-commit — rollup-committer"]
         RG -.->|"fail: gate stops the run (skips below it, named)"| RC
     end
 
     P -->|"needs: prepare only"| RD
-    CA -->|uphold| FD
-    CA -->|uphold| BD
-    CG -.->|"fail: run stops; both islands settle skipped (DependencyFailed)"| FD
-    CG -.->|"fail: run stops; both islands settle skipped (DependencyFailed)"| BD
+    PA -->|uphold| FC
+    PA -->|uphold| BC
+    PG -.->|"fail: run stops; both write lanes settle skipped (DependencyFailed)"| FC
 ```
 
-The dotted edges show what a failed gate does: admissions halt, and everything below the gate
-settles as skipped with a named `DependencyFailed` reason — the failed lane's appeal and commit never
-run, the other islands finish if already in flight, and the run's conclusion is `Failed` (exit 1 on a
-step error, 2 on max-turns, 3 on budget) with the journal carrying every reason.
+The dotted edge shows what a failed gate does: admissions halt, and everything below it settles as
+skipped with a named `DependencyFailed` reason — the committers never run, the rollup island
+finishes if already in flight, and the run's conclusion is `Failed` with the journal carrying every
+reason.
 
-## 11. One gate — producer, panel, appellate, commit
+## 11. One pipeline — per PR, detached, never blocked by a wave
 
-Every lane is the same four-step shape. Behind each `*-draft` sits a panel of three
-`verdict-judge` seats (`panel: "3"`, `merge: majority`, `max-feedback: "2"`, `deny-write` every
-path), then a one-seat `appellate-judge` (`panel: "1"`, `merge: unanimous`, `max-feedback: "0"`),
-then the mechanical committer. Seats run concurrently inside one step — one engine concurrency
-slot — and each seat's final message is exactly `{"verdict":"pass"|"fail","issues":[...]}`; the
-merged verdict is the step's settled final message. A majority needs strictly more pass votes, so a
-tie fails; unanimous needs every seat. The producer's claims are not evidence: a seat re-reads the
-artifacts and re-verifies live with read-only `gh` (`gh api`, `gh issue/pr view` — never a write).
-
-A fail issue names what the rubric requires, what the work shows, and where the proof lives; a
-failed verdict then requeues the producer with a `## Judge feedback` section (journaled as
-`FeedbackRetried`) and the panel re-runs, bounded per producer by `max-feedback 2`. Still failing
-after that budget, the gate settles failed and its `on-failure` decides the rest. The appellate seat
-is the check on the panel: it re-derives the verdict from the cited evidence rather than counting
-votes, overturns one it cannot reproduce, and treats rubric-out-of-scope requests as no grounds for
-failure. Because a seat that errors fails the whole judge step as an error rather than a verdict,
-judge steps carry generous `max-turns` (45–60) and `retry: 1`.
+`pr-pipeline` is the step the per-PR architecture lives in. It shards `rows.jsonl` into ONE item per
+PR and dispatches the whole window as detached children: every group's `spawn_agents` call carries
+`"detached": true`, so it returns at admission and the pool runs the members under the concurrency
+knob while the orchestrator does other work. No call awaits a wave, so no PR waits for another.
 
 ```mermaid
-flowchart TD
-    PROD["file-draft — lib-adoption-analyst<br/>draft + evidence bundle into run-ledger/filer/<slug>/"] --> PANEL{"file-gate — verdict-judge<br/>panel 3, merge majority, max-feedback 2<br/>rubric: merges resolve live, duplication proven,<br/>scope policy read, anchors resolved, one validated mermaid"}
-    PANEL -->|"pass: more pass votes"| APP{"file-appeal — appellate-judge<br/>panel 1, merge unanimous, max-feedback 0"}
-    APP -->|"uphold"| COMMIT["file-commit — finding-committer<br/>idempotent: check by title, create, verify"]
-    PANEL -->|"fail: requeue the producer with ## Judge feedback"| PROD
-    PANEL -->|"still failing after the budget: gate settles failed"| SKIP["on-failure: stop halts admissions<br/>the appeal and commit settle skipped,<br/>named DependencyFailed (only leaf committers may skip)"]
-    APP -->|"fail"| SKIP
+sequenceDiagram
+    participant O as pr-pipeline (orchestrator)
+    participant Pool as subagent pool (cap 48)
+    participant A as PR #41 (rev-sync)
+    participant B as PR #900 (hoist)
+    participant C as PR #1200 (irrelevant)
+
+    O->>Pool: spawn_agents merge-classifier detached, 22 groups of 32
+    Pool-->>O: accepted ids (immediate — no await)
+    O->>O: poll_agents waitSecs 120
+    Pool->>C: fetch files, no watch-path hit
+    C-->>Pool: verdict: irrelevant
+    Pool-->>O: poll collects #1200 → verified, journey ends
+    Pool->>A: fetch files, Cargo.lock pin bump
+    A-->>Pool: verdict: rev-sync
+    Pool-->>O: poll collects #41 → verified
+    O->>Pool: spawn_agent revsync-applier for #41 (detached)
+    Note over A,B: #41's stage 2 starts while #900 is<br/>still in its FIRST stage
+    Pool->>B: fetch files, generic logic in src/
+    B-->>Pool: verdict: hoist
+    Pool-->>O: poll collects #900 → verified
+    O->>Pool: spawn_agent finding-filer for #900 (detached)
 ```
+
+What the shape buys, and what it costs. Bought: a PR's journey never waits on a sibling, the
+wall-clock reclaims one child without stalling 47 others, and each child's context holds one PR's
+evidence instead of a batch of six. Cost: the orchestrator tracks ~N PRs, which is why per-PR state
+lives in `run-ledger/` and its context holds the chart — it verifies a verdict by reading the
+child's FILE, never by re-reading the envelope into its own context.
 
 ## 12. The draft/commit split
 
-The drafters and the committers are different agents. The drafters keep the judgment and lose the
-write: `finding-filer` writes `run-ledger/filer/<slug>/draft.md` plus its evidence bundle and
-returns `ready <slug>` / `already-filed` / `already-tracked` / `refused` / `blocked`;
+The stage-2 drafters and the committers are different agents. The drafters keep the judgment and
+lose the write: `finding-filer` writes `run-ledger/filer/<slug>/draft.md` plus its evidence bundle
+and returns `ready <slug>` / `already-filed` / `already-tracked` / `refused` / `blocked`;
 `revsync-applier` clones, branches, and commits pin lines locally — never pushes — writing
-`run-ledger/revsync/<slug>/branch.md` and `pr-body.md` and returning `ready` / `already-open #N` /
-`blocked`; `rollup-writer` composes `run-ledger/rollup/target.md`, `state-body.md`, and
+`run-ledger/revsync/<slug>/branch.md` and the PR body and returning `ready` / `already-open #N` /
+`blocker`; `rollup-writer` composes `run-ledger/rollup/target.md`, `state-body.md`, and
 `comment.md` and writes nothing to GitHub. The judges re-verify those drafts live. Only then do the
 committers — deliberately mechanical, because the intelligence is gated upstream — perform the
 run's only GitHub writes, each idempotently so a retry can never duplicate an issue.
 
 ```mermaid
 flowchart LR
-    subgraph drafts["draft steps — run-ledger/ only, no GitHub writes"]
-        FD["file-draft"] --> FO["run-ledger/filer/<slug>/<br/>draft.md + evidence bundle"]
-        BD["bump-draft"] --> BO["run-ledger/revsync/<slug>/<br/>branch.md + pr-body.md, never pushed"]
-        RD["rollup-draft"] --> RO["run-ledger/rollup/<br/>target.md + state-body.md + comment.md"]
+    subgraph drafts["stage-2 drafts — run-ledger/ only, no GitHub writes"]
+        FO["run-ledger/filer/<slug>/<br/>draft.md + evidence bundle"]
+        BO["run-ledger/revsync/<slug>/<br/>branch.md + pr-body.md, never pushed"]
+        RO["run-ledger/rollup/<br/>target.md + state-body.md + comment.md"]
     end
-    FO -->|"ready / already-tracked / refused / blocked"| G{"*-gate then *-appeal<br/>verdict-judge panel 3 majority,<br/>appellate-judge panel 1 unanimous"}
-    BO -->|"ready / already-open / blocked"| G
+    FO -->|"ready / already-tracked / refused / blocked"| G{"pipeline-gate then pipeline-appeal<br/>verdict-judge panel 3 majority,<br/>appellate-judge panel 1 unanimous"}
+    BO -->|"ready / already-open / blocker"| G
     RO -->|"drafts + exception list"| G
     G -->|"passed"| C{"file-commit / bump-commit / rollup-commit<br/>check-before-create, write byte-identically, verify"}
     C --> W["the lane's only GitHub write:<br/>finding issue, pin-bump PR, tracking-issue body + comment"]
     C --> OUT["run-ledger/outcomes/<br/>file-<slug>.md, bump-<slug>.md, rollup.md"]
 ```
-

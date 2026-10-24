@@ -38,10 +38,14 @@ concurrency:
 
 env:
   TARGET_REPO: ahmedhosnypro/craft-libs
-  # Subagent pool knobs (runtime ceilings: 1024 / 1024 / 4).
-  CRAFT_AGENT_SUBAGENT_MAX_CONCURRENCY: "1024"
+  # Subagent pool knobs. The concurrency cap is a deliberate bound, not
+  # a ceiling to chase: each child is a full runner with its own context
+  # and provider stream, and the job's runner has 7 GB, so 688 PRs at
+  # once would thrash. The hub queues the rest FIFO, so the window's
+  # per-PR pipelines still all progress — just 48 at a time.
+  CRAFT_AGENT_SUBAGENT_MAX_CONCURRENCY: "48"
   CRAFT_AGENT_SUBAGENT_MAX_TOTAL: "1024"
-  CRAFT_AGENT_SUBAGENT_MAX_DEPTH: "4"
+  CRAFT_AGENT_SUBAGENT_MAX_DEPTH: "2"
   # One model call may stream past 5 minutes (thinking models); the
   # client deadline must exceed real generation time.
   CRAFT_AGENT_REQUEST_TIMEOUT_SECS: "900"
