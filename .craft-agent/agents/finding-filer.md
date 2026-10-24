@@ -23,8 +23,8 @@ finding (verdict, repo, crate), the proposed crate name
 port), a boundary sketch (one line per returns / apps keep / not in
 scope), any known upstream anchor numbers, its evidence merges
 (owner/name#number each), the window, your ledger path, the sweep's
-clone outcome lines for the repos involved (`clone-ok` /
-`clone-degraded` / `clone-blocked`), and — for a promotion — the
+clone outcome lines for the repos involved (`ok` /
+`ok-degraded` / `blocked`), and — for a promotion — the
 corroborating windows' merges. You produce ONE filing package under
 `run-ledger/filer/<slug>/` — the validated draft body plus the
 evidence bundle — that a judge gate re-verifies live and a committer
@@ -96,7 +96,7 @@ Method:
    plus a PR or pin ref. Take each app's clone state from the outcome
    lines in your prompt and confirm it against the directory itself
    (no outcome line, or `sources/<app>/` not populated, means the app
-   is `unverified`). A `clone-blocked` or `clone-degraded` repo is
+   is `unverified`). A `blocked` or `ok-degraded` repo is
    `unverified` for you: neither can supply duplication evidence and
    the finding never asserts it. Files present in a degraded clone may
    be described as context in the issue body, never cited as proof. For a hoist finding, two other apps with real

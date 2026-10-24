@@ -43,7 +43,7 @@ steps:
         the uncollected count is unknown.
       - `clone-outcomes.txt`: every `ok` line's `sources/<slug>/` is
         populated, and a git-method `ok` line's HEAD resolves to its
-        recorded rev. A mismatched HEAD is degraded, never clone-ok.
+        recorded rev. A mismatched HEAD is degraded, never ok.
         `ok-degraded` and `blocked` repos are EXCEPTIONS — never a
         reason to stop, never duplication evidence, and never silent.
       - `digest.md`: the digest exists and names every closed finding

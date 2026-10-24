@@ -124,8 +124,8 @@ cited upstream — but creates no issue).
 what it means for craft-libs. Omit repos with zero merges.>
 
 **Exceptions:** <gaps, retries, helper/REST mismatches, blockers — only
-when present. A `clone-degraded`/`clone-blocked` repo is an exception;
-it cannot supply duplication evidence.>
+when present. A `blocked` or `ok-degraded` repo is an exception; it
+cannot supply duplication evidence.>
 
 State updated: <issue permalink>.
 ```

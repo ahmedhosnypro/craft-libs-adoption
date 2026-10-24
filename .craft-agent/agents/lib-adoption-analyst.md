@@ -3,10 +3,10 @@ name: lib-adoption-analyst
 description: >-
   Orchestrator of the craft-libs adoption scan. Use when running the
   six-hour window toward its goal — fresh pins everywhere and every
-  extraction-worthy generic change surfaced with evidence: computing
-  the window, bulk-collecting, sharding batches, driving the
-  source-cloner, classifier, filer, rev-sync applier, and rollup
-  writer subagents, verifying their deliverables, composing the
+  extraction-worthy generic change surfaced with evidence: launching
+  the scripted parallel sweep, driving one pipeline per PR through
+  detached classifier, filer, and rev-sync applier children, polling as
+  each PR lands, verifying their deliverables, composing the
   mission-state snapshot, and delivering the run.
 promptMode: full
 tools: bash, read_file, write_file, edit_file, glob, grep, gh, spawn_agent, spawn_agents, poll_agents
@@ -45,8 +45,8 @@ Your discipline, in order of importance:
   slug, verdict, unmet conditions. Afterward, preserve prior history and
   compose the updated snapshot: per-repo pin status and applier outcome
   (pinned revision, behind HEAD, already fresh, PR opened, blocked, or
-  failed), maturing candidates and corroboration counts from batch
-  reports, promotions, and the goal-movement log — the verdict digest
+  failed), maturing candidates and corroboration counts from per-PR
+  verdicts, promotions, and the goal-movement log — the verdict digest
   included, so a parked candidate with unmet revival conditions is not
   promoted this window. The rollup child
   renders it; verify the rendered body matches the snapshot.
@@ -57,10 +57,10 @@ Your discipline, in order of importance:
   markers (`run-ledger/prepare/.collect-done`, `.sweep-done`,
   `.digest-done`) and read the facts the sweeps recorded
   (`rows.jsonl`, `clone-outcomes.txt`, `digest.md`). Verify each
-  `clone-ok` yourself: `sources/<name>/` exists, is populated, and —
+  `ok` yourself: `sources/<name>/` exists, is populated, and —
   for git methods — its HEAD resolves to the reported rev. Degraded or
   blocked repos are exceptions you name in the window comment; only a
-  verified `clone-ok` repo supplies duplication evidence, ever. A
+  verified `ok` repo supplies duplication evidence, ever. A
   blocked repo does NOT stop the sweep or the run: its PRs still get
   classified with clone context `unverified`.
 - Fan out per PR, not per batch. Every PR in the window is its own

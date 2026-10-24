@@ -26,15 +26,29 @@ ledger row, or GitHub artifact it names must exist and you must check it.
 Wall time is dominated by per-turn model latency; parallelism comes from MANY SMALL children, not
 from children doing serial work:
 
-- You collect the whole window yourself in one REST sweep — two orchestrator turns at most. Children
-  never collect the window.
+- You never collect the window and you never clone: Phase 1 and Phase
+  1b are scripts (`scripts/launch-sweeps.sh` starts both, plus the
+  verdict-digest read, concurrently). Your orchestrator turns are for
+  verifying what the sweeps recorded, sharding PRs, driving per-PR
+  pipelines, maintaining your ledger, and composing the state snapshot.
+  A sweep's failure is a recorded outcome you triage — never a model
+  decision, and never a wave the orchestrator awaits.
 
-- Shard raw PRs into batches of at most 6. Plan the dispatch as capacity-grouped calls fired in ONE turn so every group's `sum(1 + PRs per batch) ≤ concurrency` (1024 with the scan's knob); that counts each coordinator and its possible per-PR grandchildren. Fire every group's call in the same turn — no wave barrier: verification of a finished group happens as its results land while the next group is already running. Within a group use one `spawn_agents` call for 2..=32 batches, or `spawn_agent` for one batch; never create one-item `spawn_agents` calls. Rebalance call groups so none has one item. A re-spawn for a failed batch keeps its number as `batch-<NN>-retry` and fires with the next turn's calls, never as a new wave.
+- Shard raw PRs ONE PER PR — never a batch, because a batch child is a
+  barrier its siblings wait on. Dispatch the whole window detached:
+  every group's call in ONE turn, each returning at admission, so no
+  call awaits a wave and no PR waits on another. Collect with
+  `poll_agents` as verdicts land, verify each PR as it settles, and
+  advance that PR to its next stage immediately while others are still
+  in their first. A PR may finish its whole journey while another is
+  only starting.
 
-- Per-item work never loops inside one agent. A batch child with more than one PR spawns ONE
-  grandchild per PR in a single spawn_agents call and only aggregates; a one-PR batch is classified
-  directly. Turn SHAPES are guidance, not caps: a batch child's four moves (claim; spawn;
-  verify+report; close) and a grandchild's three (fetch+ledger; verdict; spare) describe the fastest
+- Per-item work never loops inside one agent. Every classifier child
+  owns exactly ONE PR: fetch, classify, write its verdict, done. There
+  are no coordinators and no grandchildren — a coordinator is a barrier
+  its members wait on, and a grandchild adds a level the per-PR shape
+  does not need. Turn SHAPES are guidance, not caps: a classifier's
+  moves (claim; fetch+classify; verdict; spare) describe the fastest
   honest path — take as many turns as the work needs.
 
 - Single-deliverable children (filer, applier, rollup) own ONE deliverable, never a per-item loop —
@@ -50,29 +64,42 @@ from children doing serial work:
 - THE WALL-CLOCK LAW — never `timeoutSecs: 0`. Every spawn call carries a finite `timeoutSecs`
   (1800 for a clone, filer, applier or rollup child; 3600 for a classifier wave and its
   grandchildren). Token budgets stay unlimited; a wall clock is different: a child with no clock can
-  hang the tool call that awaits it, and `subagent_started` events drain only after the batch
-  returns, so one stuck child silences both the stream and the step. The clock reclaiming a child is
-  a named exception, never a lost run.
-- THE CALL SHAPE LAW (exact, never invented — the schema rejects anything else): the profile's key
-  is `agent`, never `profile`. The batch call is
-  `{"agent": "<profile-name>", "promptTemplate": "<...>{{item}}<...>", "items": ["<...>", ...],
-  "maxTurns": 10000, "timeoutSecs": 0}` — `promptTemplate` must carry the literal `{{item}}`
-  placeholder, and each `items` entry fills it. The single call is
-  `{"agent": "<profile-name>", "prompt": "<the whole prompt>", "maxTurns": 10000,
-  "timeoutSecs": 0}`. A rejected call (missing `promptTemplate`, no `{{item}}`, wrong key) means fix
-  the call shape on the next turn — never re-send the same broken shape, and never fall back to
-  doing a child's work yourself.
-- Exactly one grandchild level (depth 3): a grandchild never spawns.
+  hang the tool call that awaits it, so even a detached wave's straggler must be reclaimable. The
+  clock reclaiming a child is a named exception, never a lost run.
+- THE DETACHED LAW — add `"detached": true` to either spawn tool to return at admission: the
+  members still run concurrently under the same cap, but no single call awaits the whole wave, so
+  the orchestrator advances each item as it settles instead of waiting for the slowest. Collect with
+  `poll_agents` — `{"waitSecs": 120}` for a bounded wait, `{}` to drain everything settled, or
+  `{"ids": [...]}` for named children. A poll returning `outstanding` is normal state: keep polling
+  and keep verifying. This is how phases become per-PR rather than window-wide.
+- THE CALL SHAPE LAW (exact, never invented — the schema rejects
+  anything else): the profile's key is `agent`, never `profile`. The
+  batch call is
+  `{"agent": "<profile-name>", "promptTemplate": "<...>{{item}}<...>",
+  "items": ["<...>", ...], "maxTurns": 10000, "timeoutSecs": 1800}` —
+  `promptTemplate` must carry the literal `{{item}}` placeholder, and
+  each `items` entry fills it. The single call is
+  `{"agent": "<profile-name>", "prompt": "<the whole prompt>",
+  "maxTurns": 10000, "timeoutSecs": 1800}`. Add `"detached": true` to
+  either to return at admission and collect later with `poll_agents`. A
+  rejected call (missing `promptTemplate`, no `{{item}}`, wrong key)
+  means fix the call shape on the next turn — never re-send the same
+  broken shape, and never fall back to doing a child's work yourself.
+- No grandchild level (depth 2): a per-PR child never spawns. The
+  orchestrator and its children are the whole tree.
 
 ## The pool envelope (plan inside it)
 
 - Concurrency: at most 1024 subagents at once, tree-wide. Batch: 2-32 items per spawn_agents call,
   prompts ≤ 64 KiB each.
 
-- Total: at most 1024 subagents per run — reserve ~30 (18 cloners, ≤6 filers/appliers, rollup,
-  retries); batch children plus per-PR grandchildren take the rest (~994 PRs). Beyond that,
-  classify newest-first and report the unclassified count as an EXCEPTION. Depth: at most 4; this
-  design uses 3 and must not go deeper.
+- Total: at most 1024 subagents per run — reserve ~30 (filer/applier/rollup, retries); per-PR
+  classifier children take the rest. Beyond that, classify newest-first and report the unclassified
+  count as an EXCEPTION. Depth: at most 4; this design uses 2 (an orchestrator and its per-PR
+  children) and must not go deeper.
+
+- Each child is independent: it shares nothing with any other child and waits on none. One PR's
+  journey may finish while another's is only starting — that independence is the design, not a race.
 
 - Every agent follows the vendored pooled-missions skill (.agents/skills/pooled-missions/SKILL.md):
   own ledger at the path the prompt names, claim/done transitions, park-never-delete.
@@ -81,8 +108,8 @@ from children doing serial work:
 
 | agent | one child handles | own ledger |
 |---|---|---|
-| source-cloner | ONE repo's fresh clone into sources/<name>/, verified, with a bounded retry ladder | run-ledger/clone/<name>/ |
-| merge-classifier | ONE batch of ≤6 window PRs — coordinator spawning one per-PR grandchild (direct when the batch is one PR) | run-ledger/classifier/batch-<NN>/ |
+| source-cloner | retired: the clone sweep is `scripts/clone-sweep.sh`, a bounded parallel ladder with one outcome line per repo | run-ledger/prepare/clone-outcomes.txt |
+| merge-classifier | ONE window PR — fetched and classified directly, no coordinator, no grandchild | run-ledger/classifier/pr-<number>/ |
 | finding-filer | ONE finding (issue on the fork, scope-policy-aligned) | run-ledger/filer/<slug>/ |
 | revsync-applier | ONE bump candidate (clone, branch, PR) | run-ledger/revsync/<slug>/ |
 | rollup-writer | the window comment + the Mission State body | run-ledger/rollup/ |
@@ -112,85 +139,92 @@ from children doing serial work:
 
 4. Stop before the turn budget; a finished small run beats an unfinished ambitious one.
 
-## Phase 1 — Collect the window (yourself, ≤2 turns)
+## Phase 1 — Collect the window (a script)
 
-ONE bash turn, REST is the source of record: a loop over all 17 repos paging `gh api --method GET
-"repos/<full>/pulls?state=closed&sort=updated&direction=desc&per_page=100"` (GET only, never `-f`,
-no `--paginate`), keeping rows with `merged_at >= since`, early-exit when a page's max `updated_at`
-predates `since`, page cap 15 per repo → `rows.jsonl`; if the cap is reached before crossing
-`since`, record `collection-truncated` and report that the uncollected count is unknown. Then
-`craft-helpers prs --org storytold --repos <all 17> --since <window> --limit-per-repo 100 --json >
-prs.json` as a CROSS-CHECK (it has twice silently undercounted; REST always wins). `collection.md`
-records the window and the helper/REST/final table — workspace audit only; a mismatch is an
-EXCEPTION that surfaces in the window comment.
+ONE bash call to `scripts/collect-window.sh <since>`: the REST sweep is
+the source of record and the AI never runs it. The script loops every
+repo in `config/repo-list.txt`, paging `gh api --method GET
+"repos/<full>/pulls?state=closed&sort=updated&direction=desc&per_page=100"`
+(GET only, never `-f`, no `--paginate`), keeps rows with
+`merged_at >= since`, early-exits when a page's max `updated_at`
+predates `since`, and caps 15 pages per repo → `rows.jsonl`; reaching
+the cap before crossing `since` writes the `collection-truncated:<repo>`
+marker, whose uncollected count is unknown. It then runs
+`craft-helpers prs --org storytold --repos <all configured> --since 7h
+--limit-per-repo 100 --json > prs.json` as a CROSS-CHECK (it has twice
+silently undercounted; REST always wins), and `collection.md` records
+the window, the per-repo table, and the helper/REST/final comparison —
+workspace audit only, where a mismatch is an EXCEPTION that surfaces in
+the window comment.
 
-## Phase 1b — Clone the sources (one spawn wave)
+## Phase 1b — Clone the sources (a script, run beside Phase 1)
 
 The run's code questions are answered from real code, never from the `candidates` column of
 repo-list.txt (a claim) and never from API file lists alone (they show a diff, not the suite). This
 phase brings the real code into the window: every scanned repo, cloned fresh — including repos with
-zero merges, because duplication is proven across the suite, not across the window. Use one
-`spawn_agents` call for the 18 current clone items (17 configured repos plus `storytold/craft-libs`
-for scope-truth). If the list grows beyond 32 items, split into calls of 2–32 items, rebalancing so
-no call has one item; if the combined active calls would exceed the concurrency knob, split the
-clones into sequential capacity-safe waves.
-Each member receives `maxTurns: 10000`, `timeoutSecs: 1800`, and no `maxTokens`. Item shape:
-`<owner/repo>|<watch-paths csv>|<purpose>` where purpose is `scan-source`, or `scope-truth` for
-craft-libs (its watch-paths are `AGENTS.md,Cargo.toml,crates,docs,licenses` — the root `Cargo.toml`
-carries the real `[workspace.dependencies]` `craft-` list that the filer's crate-name gate reads;
-without it the gate falls back to the contents API). Each child clones into
-`sources/<repo-slug>/` — the repo basename from `<owner/repo>` (logged with its owner),
-workspace-relative and refreshed every run; `storytold/craft-libs` maps to `sources/craft-libs/`. It
-verifies the watch-paths are really populated, and retries through a bounded ladder (sparse → full →
-tarball → per-file API) with every attempt in its ledger.
+zero merges, because duplication is proven across the suite, not across the window.
+`scripts/launch-sweeps.sh <since>` starts this clone sweep, the Phase 1
+collection, and the verdict-digest read in ONE call, all three
+concurrent — the phase's wall time is their max, never their sum.
 
-Verify every `clone-ok <repo> <method> <short-sha>` against `sources/<repo-slug>/`: the directory and
-watch-path files must be populated. For sparse/full Git clones, verify `HEAD` resolves to the
-reported revision; a mismatch is degraded, not `clone-ok`. Tarball/per-file API fallbacks report
-`clone-degraded` and carry no revision — verify their watch-path coverage (present, non-empty)
-only. The sweep's outcomes set the run's verification floor:
+`scripts/clone-sweep.sh` clones every configured repo plus
+`storytold/craft-libs` (scope-truth, watch-paths `AGENTS.md,Cargo.toml,crates,docs,licenses` —
+the root `Cargo.toml` carries the real `[workspace.dependencies]` `craft-` list that the filer's
+crate-name gate reads; without it the gate falls back to the contents API) through the ladder
+sparse → full → tarball, eight repos at a time, into `sources/<repo-slug>/` — the repo basename
+from `<owner/repo>`, workspace-relative and refreshed every run;
+`storytold/craft-libs` maps to `sources/craft-libs/`. Each attempt is
+recorded, and the sweep's output is one line per repo:
+`<owner/repo>\t<ok|ok-degraded|blocked>\t<method>\t<rev>\t<files>`.
+
+Verify every `ok` line against `sources/<repo-slug>/`: the directory and watch-path files must be
+populated, and for git methods `HEAD` must resolve to the reported revision; a mismatch is degraded,
+not `ok`. A `tarball` outcome reports `ok-degraded` and carries no revision — verify its watch-path
+coverage (present, non-empty) only. The sweep's outcomes set the run's verification floor:
 
 - A repo without a populated, verified clone (including a degraded/blocked clone or missing watch
   paths) contributes NO duplication evidence, EVER — findings naming it mark that consumer
   `unverified`.
 
-- `clone-degraded` / `clone-blocked` repos are EXCEPTIONS in the window comment, never silent, and
-  never a reason to stop the run.
+- `ok-degraded` / `blocked` repos are EXCEPTIONS in the window comment, never silent, and never a
+  reason to stop the run.
 
-## Phase 2 — Classify: shard raw PRs into capacity-grouped dispatch
+- A blocked repo does NOT block its PRs: they are still classified, with
+  clone context marked `unverified`. The classifier's prompt carries its
+  repo's clone-status for exactly this.
 
-Zero merges: skip to Phase 3. Otherwise build batches of at most 6 merges each, keeping every batch
-to ONE repo so `pr-<number>.verdict` filenames cannot collide across repos. Order batches by newest
-merge so any pool-limit truncation remains newest-first. Batch numbering starts at 01 and is dense —
-a failed batch keeps its
-number as `batch-<NN>-retry`; gaps and retries are EXCEPTIONS that surface in the window comment,
-never silent. For every batch build one item of the form:
-`batch-<NN>|<owner/repo>#<number>;<title>;<merged-at>|...` (titles stripped of `|` and `;`; each
-prompt also carries those repos' watch-paths and the classification rules below.)
+## Phase 2 — Classify: one pipeline per PR
 
-Group the batches so every group's `sum(1 + PRs per batch) ≤ concurrency` and fire all groups'
-calls in the SAME turn: one `spawn_agents` call for 2–32 batches per group (profile
-`merge-classifier`; each member gets `maxTurns: 10000` and `timeoutSecs: 3600`), or `spawn_agent` for
-a single-batch group. Both calls carry THE CALL SHAPE LAW's exact keys (`agent`,
-`promptTemplate` with `{{item}}`, `items`). There is no wave barrier — a finished
-group's results are verified as they land while later groups are still running; a failed batch is
-re-spawned once with the next turn's calls, keeping its number and ORIGINAL caps. Rebalance groups
-to avoid one-item calls; never spawn one call per batch. A batch child never loops over its PRs:
-turn 1 claims its ledger and splits the batch into per-PR grandchild prompts (repo, number, title,
-merged-at, that repo's watch-paths, and the verdict contract inline); turn 2 fires ONE spawn_agents
-call — one item per PR, same profile, `maxTurns: 10000`, `timeoutSecs: 3600`, 
-per grandchild — while a one-PR batch is classified directly instead; turn 3 verifies the verdict
-files and writes the batch report; turn 4 closes.
+Zero merges: skip to Phase 3. Otherwise shard `rows.jsonl` into ONE item
+per PR — never a batch of several, because a batch child is a barrier
+its siblings wait on. Order items newest-first so any pool-limit
+truncation remains newest-first. Each item carries everything its child
+needs and nothing it does not: `<owner/repo>#<number>|<title>|<merged-at>|<watch-paths csv>|<clone-status>`
+(titles stripped of `|` and `;`; watch-paths from `config/repo-list.txt`,
+clone-status from the Phase 1b outcome lines).
 
-Each grandchild handles exactly ONE PR: fetch the complete changed-file list (`per_page=100`,
+Dispatch the whole window DETACHED, every group's call in ONE turn —
+one `spawn_agents` call per group of 2–32 items, or the detached
+`spawn_agent` for a single item, each carrying `"detached": true`,
+`maxTurns: 10000`, `timeoutSecs: 3600`, and no `maxTokens`. Both tools
+return at admission and name their accepted ids, so a group costs
+nothing to queue and the pool runs the members under the concurrency
+knob while the orchestrator does other work. There is no wave barrier
+and no coordinator: poll with `poll_agents` (`{"waitSecs": 120}`, `{}`,
+or `ids`) and verify each PR as its verdict lands. A child that never
+delivered is re-spawned once with a narrowed prompt keeping its
+ORIGINAL caps; a second failure is an EXCEPTION that surfaces in the
+window comment, never silent.
+
+Each child handles exactly ONE PR: fetch the complete changed-file list (`per_page=100`,
 paginate if needed), including patches where available. Use the PR patch/diff to establish what
 changed; use the clone only for surrounding-code context. A clone alone cannot establish the PR
 change, and file paths alone cannot prove generic logic. Record the verdict as a task row, then
-write `run-ledger/classifier/batch-<NN>/pr-<number>.verdict` — one line, `<class> | <repo>#<number>
+write `run-ledger/classifier/pr-<number>.verdict` — one line, `<class> | <repo>#<number>
 | <one-line reason> | <files evidence>`, where `<class>` is rev-sync, hoist, port, irrelevant,
-`unverified`, or `maturing:<slug>` — and return the same line as the final message. A third turn
+`unverified`, or `maturing:<slug>` — and return the same line as the final message. A later turn
 exists only to retry a failed fetch or write; the gap goes into the verdict file, never silence. A
-grandchild never spawns and never touches another PR.
+classifier never spawns and never touches another PR.
 
 Classification rules: if no changed path intersects the repo's watch-paths, return `irrelevant`
 without patch inspection (pin files always count as in-scope). For mixed-path PRs, classify from the
@@ -214,10 +248,14 @@ shared-named crate is never blanket-exempted. Generic hardening inside a shared-
 hoist-eligible regardless of which app owns the copy; every in-path verdict is per-PR with file
 evidence.
 
-Verify on return: every batch report and `pr-<number>.verdict` file exists, and the verdict count
-equals the batch size; spot-check two verdicts against the live file lists and patch evidence.
+Verify on return, per PR as its verdict lands: every `pr-<number>.verdict` file the child named
+exists with the one-line contract shape, and its cited file evidence matches what the child
+actually read. Spot-check two verdicts against the live file lists and patch evidence. Then advance
+that PR: a `rev-sync` verdict gets its `revsync-applier` child next, a `hoist` or `port` verdict its
+`finding-filer` child next — each dispatched DETACHED the moment it lands, while other PRs are still
+in Phase 2. No PR waits on another.
 
-## Phase 3 — File findings: up to two spawn_agents calls in ONE turn
+## Phase 3 — File findings: the stage-2 children a PR advances into
 
 Rank from the batch reports: rev-sync first, then hoist, then port. At most 3 bump candidates and 3
 finding issues per run. Promote a maturing candidate only after it is corroborated in two
@@ -242,22 +280,29 @@ never re-filed. `already-filed` still ends a re-file, and its new evidence is no
 corroborating merges in the candidate's pipeline row via the state snapshot — new evidence reaches
 the issue through the human, not through new write shapes.
 
-Fire the calls in the SAME turn:
+Fire the calls as each PR advances, DETACHED, so a candidate's drafting
+never waits on another's:
 
-- Tool shape: one call per profile, and its `items` array must carry 2..=32 entries. A phase with
-  exactly ONE item for a profile uses the single `spawn_agent` tool instead (same profile, the item
-  fills the prompt), and zero items skips that call — a 1-item batch call is rejected ("items must
-  be 2..=32 entries, got 1"). A rejected call means fix the call shape; never respond by spawning
-  one call per item.
+- Tool shape: each advancing PR dispatches its own stage-2 child with
+  the detached SINGLE tool — `{"agent": "<profile>", "prompt": "<the
+  whole prompt>", "maxTurns": 10000, "timeoutSecs": 1800, "detached":
+  true}` — because a candidate's journey is per-PR. When several
+  candidates are ready in the same moment, one `spawn_agents` call per
+  profile still applies: its `items` array carries 2..=32 entries (one
+  candidate per item), also detached. A profile with exactly one ready
+  candidate uses the single tool; zero skips the call — a 1-item batch
+  call is rejected ("items must be 2..=32 entries, got 1"). A rejected
+  call means fix the call shape; never respond by spawning one call per
+  item.
 
-- `spawn_agents`, profile `finding-filer`, one finding per item (≤3), `maxTurns: 10000`,
-  `timeoutSecs: 1800`, no `maxTokens`. Each item ALSO carries that finding's shard contents: the
+- profile `finding-filer`, one finding per child (≤3), `maxTurns: 10000`,
+  `timeoutSecs: 1800`, no `maxTokens`, `detached: true`. Each item ALSO carries that finding's shard contents: the
   proposed crate name (`craft-<name>` for a hoist; the existing craft-libs crate for a port), a
   boundary sketch (one line per returns / apps keep / not in scope), and any known upstream anchor
   numbers (from the pipeline row or the verdict digest lines). The filer VERIFIES these against the
   clones and the live API — it never invents them; the self-contained-prompt law is preserved. Each
   item also carries that finding's per-repo clone
-  outcome lines from Phase 1b (`clone-ok` / `clone-degraded` / `clone-blocked`), so the filer can
+  outcome lines from the clone sweep (`ok` / `ok-degraded` / `blocked`), so the filer can
   prove or mark each consumer without guessing. The template requires the child to FIRST read craft-libs'
   real tree — the scope-truth clone at `sources/craft-libs/` (AGENTS.md, crates/, Cargo.toml, docs/ —
   read-only, its scope policy outranks duplication). If that clone or policy is unavailable, defer
@@ -294,8 +339,8 @@ Fire the calls in the SAME turn:
   `adoption-scan: <slug>`; if one with that exact title
   already exists, the filer verifies it and returns `already-filed` — no second issue, no comment.
 
-- `spawn_agents`, profile `revsync-applier`, one candidate per item (≤3), `maxTurns: 10000`,
-  `timeoutSecs: 1800`, no `maxTokens`. The template carries the target HEAD (the verified
+- profile `revsync-applier`, one candidate per child (≤3), `maxTurns: 10000`,
+  `timeoutSecs: 1800`, no `maxTokens`, `detached: true`. The template carries the target HEAD (the verified
 `sources/craft-libs/` rev), the branch-name dedupe key, the scratch-clone mechanics, pin-lines-only,
 and the law: any denial (write gate, 403, protected branch) is recorded as a blocker — never a
 crash, never a retry. If the scope-truth clone is not verified, do not open pin bumps against it;
@@ -312,7 +357,7 @@ does not carry fails the phase like any other unverifiable claim.
 
 ## Phase 4 — Deliver: one spawn_agent call
 
-Profile `rollup-writer`, `maxTurns: 10000`, `timeoutSecs: 1800`, no `maxTokens`. The prompt
+Profile `rollup-writer`, `maxTurns: 10000`, `timeoutSecs: 1800`, no `maxTokens`, `detached: true`. The prompt
 carries the state snapshot you composed: the previous Mission State body, this window's drift rows
 (from applier outcomes), maturing candidates with window IDs, last-seen window, consecutive-window
 streak and corroboration counts, every verified artifact by number, `already-tracked` findings with
@@ -334,11 +379,11 @@ accumulates — comments are transient signal. Verify both artifacts with `gh ap
 
 ## Rules (absolute)
 
-- Spawn tool law: `spawn_agent` runs one child; `spawn_agents` accepts 2–32 items. Use the
-  single-child tool for one item; rebalance multi-call groups so no call has one item. Keep
-  concurrent work within the concurrency knob (128 in the scan) tree-wide; group every dispatch so
-  each group's concurrent children fit it — a group that does not fit splits, it never waits on a
-  wave barrier. Never fire one call per piece.
+- Spawn tool law: `spawn_agent` runs one child; `spawn_agents` accepts 2–32 items; `poll_agents`
+  collects what detached children produced. Use the single-child tool for one item; rebalance
+  multi-call groups so no call has one item. Keep concurrent work within the concurrency knob
+  tree-wide; group every dispatch so each group's children fit it — a group that does not fit
+  splits, it never waits on a wave barrier. Never fire one call per piece.
 
 - The skills path law. All vendored skills live at WORKSPACE-RELATIVE paths:
   `.agents/skills/<name>/SKILL.md`, with their scripts at `.agents/skills/<name>/scripts/` — e.g.
