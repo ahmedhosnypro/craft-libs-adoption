@@ -19,6 +19,10 @@ on:
         options:
           - mission
           - adopt-libs
+      gateway-tag:
+        description: "IronRouter release tag to run the gateway from (empty = latest published release)"
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -41,9 +45,17 @@ env:
   # One model call may stream past 5 minutes (thinking models); the
   # client deadline must exceed real generation time.
   CRAFT_AGENT_REQUEST_TIMEOUT_SECS: "900"
-  MODEL_GATEWAY_REPO: ahmedhosnypro/ironrouter-backend
+  # The model gateway comes from the published IronRouter release
+  # (ahmedhosnypro/IronRouter), not a source checkout: one asset pair —
+  # the gateway binary (dashboard embedded) and the migration binary —
+  # plus checksums. The registry dump still ships in the backend source
+  # repo and is fetched by itself. A dispatch may pin a release tag; the
+  # default resolves the latest published release.
+  MODEL_GATEWAY_RELEASE_REPO: ahmedhosnypro/IronRouter
+  MODEL_GATEWAY_SOURCE_REPO: ahmedhosnypro/ironrouter-backend
   MODEL_GATEWAY_DUMP: ironrouter-registry.dump
-  MODEL_GATEWAY_BIN: target/release/app
+  MODEL_GATEWAY_BIN: ironrouter-x86_64-unknown-linux-gnu
+  MODEL_GATEWAY_MIGRATION_BIN: ironrouter-migration-x86_64-unknown-linux-gnu
   MODEL_GATEWAY_PORT: "17844"
   # Model the gateway must serve; a manual run may override it.
   EXPECTED_MODEL: ${{ github.event.inputs.model || 'github-actions' }}
@@ -58,16 +70,44 @@ jobs:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Fetch the model gateway (token never in a URL, config, or log line)
+      - name: Download the model gateway release (token never in a URL, config, or log line)
         env:
-          PRIVATE_REPO_ACCESS_TOKEN: ${{ secrets.PRIVATE_REPO_ACCESS_TOKEN }}
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_ACCESS_TOKEN }}
+          GATEWAY_TAG: ${{ inputs.gateway-tag }}
         run: |
           set -euo pipefail
           umask 077
-          auth="Authorization: Basic $(printf 'x-access-token:%s' "$PRIVATE_REPO_ACCESS_TOKEN" | base64)"
-          git -c "http.https://github.com/.extraheader=${auth}" \
-            clone --depth 1 "https://github.com/${MODEL_GATEWAY_REPO}.git" \
-            "${RUNNER_TEMP}/gateway"
+          # gh reads the token from the environment — it never lands in an
+          # argv, URL, or log line. An empty GATEWAY_TAG resolves the
+          # latest published release.
+          tag="$GATEWAY_TAG"
+          if [ -z "$tag" ]; then
+            tag="$(gh release view -R "$MODEL_GATEWAY_RELEASE_REPO" --json tagName --jq .tagName)"
+          fi
+          test -n "$tag" || { echo "::error::no release tag resolved for $MODEL_GATEWAY_RELEASE_REPO"; exit 1; }
+          mkdir -p "$RUNNER_TEMP/gateway"
+          gh release download "$tag" -R "$MODEL_GATEWAY_RELEASE_REPO" \
+            --pattern "$MODEL_GATEWAY_BIN" \
+            --pattern "$MODEL_GATEWAY_MIGRATION_BIN" \
+            --pattern checksums.txt \
+            --dir "$RUNNER_TEMP/gateway"
+          chmod +x "$RUNNER_TEMP/gateway/$MODEL_GATEWAY_BIN" \
+                   "$RUNNER_TEMP/gateway/$MODEL_GATEWAY_MIGRATION_BIN"
+          (cd "$RUNNER_TEMP/gateway" && sha256sum --check checksums.txt)
+          echo "gateway release $tag: binary + migration binary, checksums verified"
+
+      - name: Fetch the registry dump from the backend source repo
+        env:
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+          umask 077
+          # The registry dump ships in the backend source repo (not as a
+          # release asset); fetch the single file by its raw content type.
+          gh api "repos/${MODEL_GATEWAY_SOURCE_REPO}/contents/${MODEL_GATEWAY_DUMP}" \
+            -H "Accept: application/vnd.github.raw" > "$RUNNER_TEMP/gateway/${MODEL_GATEWAY_DUMP}"
+          test -s "$RUNNER_TEMP/gateway/${MODEL_GATEWAY_DUMP}" \
+            || { echo "::error::the registry dump fetch returned an empty file"; exit 1; }
 
       - name: Start the gateway database
         env:
@@ -108,9 +148,10 @@ jobs:
         run: |
           set -euo pipefail
           # The gateway binary does not migrate on boot; a binary newer
-          # than the dump needs its pending migrations applied first.
+          # than the dump needs its pending migrations applied first. The
+          # migration binary ships beside the gateway in the release.
           export DATABASE_URL="postgres://ironrouter:${GATEWAY_DB_PASSWORD}@127.0.0.1:5434/ironrouter_live"
-          "./target/release/migration" up
+          "./${MODEL_GATEWAY_MIGRATION_BIN}" up
 
       - name: Start the model gateway
         env:
