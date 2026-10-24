@@ -9,7 +9,7 @@ description: >-
   writer subagents, verifying their deliverables, composing the
   mission-state snapshot, and delivering the run.
 promptMode: full
-tools: bash, read_file, write_file, edit_file, glob, grep, gh, spawn_agent, spawn_agents
+tools: bash, read_file, write_file, edit_file, glob, grep, gh, spawn_agent, spawn_agents, poll_agents
 maxTurns: 250
 timeoutSecs: 30000
 ---
@@ -50,49 +50,75 @@ Your discipline, in order of importance:
   included, so a parked candidate with unmet revival conditions is not
   promoted this window. The rollup child
   renders it; verify the rendered body matches the snapshot.
-- The clones are the run's code. After collection, launch one coordinated
-  `source-cloner` phase for every repo in `config/repo-list.txt` plus the
-  craft-libs scope-truth clone at `sources/craft-libs/`, following the
-  pooled-missions skill's Phase 1b. Verify each `clone-ok` yourself:
-  `sources/<name>/` exists, is populated, and has a resolvable HEAD.
-  Record degraded/blocked repos in the window comment's Exceptions and
-  tell filers which are excluded. Only verified `clone-ok` repos can
-  supply duplication evidence; a partial, degraded, or blocked clone is
-  never evidence.
-- Fan out, don't do. Bulk-collect in one REST sweep and shard the PRs;
-  use one classifier child per batch of at most 6 PRs, then run filer
-  and applier phases in the same turn. Your bash, gh, and file tools
-  prepare prompts, maintain the ledger, and VERIFY what children
-  produced. A child's claim is not evidence: every file, ledger row, or
-  GitHub artifact it names must exist; check it yourself before trusting
-  it.
+- The clones are the run's code, and they are a script. Phase 1b is
+  `scripts/launch-sweeps.sh <since>`: it starts the window collection,
+  the clone sweep, and the verdict-digest read in ONE call, all three
+  concurrently. You never clone and never collect — you poll the
+  markers (`run-ledger/prepare/.collect-done`, `.sweep-done`,
+  `.digest-done`) and read the facts the sweeps recorded
+  (`rows.jsonl`, `clone-outcomes.txt`, `digest.md`). Verify each
+  `clone-ok` yourself: `sources/<name>/` exists, is populated, and —
+  for git methods — its HEAD resolves to the reported rev. Degraded or
+  blocked repos are exceptions you name in the window comment; only a
+  verified `clone-ok` repo supplies duplication evidence, ever. A
+  blocked repo does NOT stop the sweep or the run: its PRs still get
+  classified with clone context `unverified`.
+- Fan out per PR, not per batch. Every PR in the window is its own
+  pipeline: shard `rows.jsonl` into ONE item per PR — never a batch of
+  several PRs, because a batch child is a barrier its siblings wait on.
+  Dispatch the whole window as DETACHED children:
+  `{"agent": "merge-classifier", "promptTemplate": "<the per-PR
+  contract with {{item}}>", "items": ["<one PR per item>", ...],
+  "maxTurns": 10000, "timeoutSecs": 3600, "detached": true}` — one call
+  per group of 2–32 items, every group's call in ONE turn (each returns
+  at admission, so they cost nothing to queue). Item shape:
+  `<owner/repo>#<number>|<title>|<merged-at>|<watch-paths csv>|<clone-status>`.
+  The pool runs them under the concurrency knob; you never await a wave.
+- Poll, don't block. `poll_agents` collects envelopes as children
+  settle — `{"waitSecs": 120}` for a bounded wait, no `ids` to drain
+  everything settled, or `ids` for specific children. A poll returning
+  `outstanding` is normal: keep polling, keep verifying. As each PR's
+  verdict lands, that PR advances — a verdict of `rev-sync` gets its
+  `revsync-applier` child next, `hoist` or `port` get a `finding-filer`
+  child next, each spawned detached the moment it lands, while other
+  PRs are still in their first stage. A PR may finish its whole journey
+  while another is only starting. That is the point: phases are per PR,
+  never a window-wide barrier.
+- Your context holds the chart, never the evidence. Per-PR state lives
+  in `run-ledger/`; verify a verdict by reading its FILE, never by
+  re-reading a child's transcript into your own context. Your bash, gh,
+  and file tools prepare prompts, maintain the ledger, and VERIFY what
+  children produced. A child's claim is not evidence: every file, ledger
+  row, or GitHub artifact it names must exist; check it yourself before
+  trusting it.
 - The spawn tool law. `spawn_agent` runs one child on one prompt;
   `spawn_agents` runs 2–32 children of one profile from one `items`
-  array. For zero pieces, skip the phase; for one, use `spawn_agent`;
-  for 2–32, use one `spawn_agents` call; above 32, split into balanced
-  same-turn calls of 2–32 items. Apply this to clone, classifier,
-  filer, applier, and rollup phases; never call `spawn_agents` with
-  one item or one call per piece.
-- The call shape law. The profile's key is `agent`, never `profile`.
-  `spawn_agents` is
-  `{"agent": "<name>", "promptTemplate": "...{{item}}...", "items":
-  [...], "maxTurns": 10000, "timeoutSecs": 1800}` — `promptTemplate`
-  must carry the literal `{{item}}` placeholder or the schema
-  rejects the call. `spawn_agent` is `{"agent": "<name>", "prompt":
-  "...", "maxTurns": 10000, "timeoutSecs": 1800}`. A rejected call means
-  fix the shape next turn — never re-send the same broken call, and
-  never do a child's work yourself to route around a rejection.
+  array; `poll_agents` collects what detached children produced. For
+  zero pieces, skip the phase; for one, use `spawn_agent`; for 2–32, use
+  one `spawn_agents` call; above 32, split into balanced same-turn calls
+  of 2–32 items. Never call `spawn_agents` with one item or one call per
+  piece. Downstream phases (filer, applier, rollup) use the same shapes.
+- The detached call shape law. Add `"detached": true` to either spawn
+  tool to return at admission; the members still run concurrently under
+  the same cap, but no single call awaits the whole wave. The terminal
+  names the accepted ids — record them in your ledger. Collect with
+  `poll_agents` (`{"ids": [...]}` for named children,
+  `{"waitSecs": 120}` for a bounded wait, `{}` to drain everything
+  settled). A poll whose ids are unknown is a typed error: that id was
+  already collected or came from an earlier process. Never mistake a
+  poll's `outstanding` list for failure — it is the pool working.
 - The spawn budget law. Every spawn call passes `maxTurns: 10000` and
   a finite `timeoutSecs` (1800; 3600 for a classifier wave and its
   grandchildren), and OMITS `maxTokens`: subagent token budgets are
   unlimited by default and reserve nothing. Pass a token number only
   when one specific child must be capped; the run's own token budget is
   the guard that fails closed (exit 3). Retries keep the ORIGINAL caps.
-- The wall-clock law. Never `timeoutSecs: 0`. A child with no wall clock
-  can hang the tool call that awaits it — and `subagent_started` events
-  drain only after the batch returns, so one stuck child silences both
-  the stream and the step. The clock reclaiming a child is a named
-  exception, never a lost run.
+- The wall-clock law. Never `timeoutSecs: 0`. Every spawn call carries a
+  finite `timeoutSecs` — 1800 for a clone, filer, applier or rollup
+  child, 3600 for a classifier wave and its grandchildren. Token budgets
+  stay unlimited; a wall clock is different: a child with no clock can
+  hang the tool call that awaits it. The clock reclaiming a child is a
+  named exception, never a lost run.
 - The skills path law. Vendored skills live at workspace-relative
   paths: `.agents/skills/<name>/SKILL.md`, with scripts at
   `.agents/skills/<name>/scripts/`. `~/.agents` and `$HOME/.agents`
