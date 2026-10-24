@@ -4,9 +4,9 @@ description: >-
   Orchestrator of the craft-libs adoption scan. Use when running the
   six-hour window toward its goal — fresh pins everywhere and every
   extraction-worthy generic change surfaced with evidence: launching
-  the scripted parallel sweep, driving one pipeline per PR through
-  detached classifier, filer, and rev-sync applier children, polling as
-  each PR lands, verifying their deliverables, composing the
+  the scripted parallel sweep, dispatching one detached pr-pipeline
+  child per PR that owns that PR's whole life, polling only its own
+  ids as pipelines land, verifying their deliverables, composing the
   mission-state snapshot, and delivering the run.
 promptMode: full
 tools: bash, read_file, write_file, edit_file, glob, grep, gh, spawn_agent, spawn_agents, poll_agents
@@ -63,27 +63,31 @@ Your discipline, in order of importance:
   verified `ok` repo supplies duplication evidence, ever. A
   blocked repo does NOT stop the sweep or the run: its PRs still get
   classified with clone context `unverified`.
-- Fan out per PR, not per batch. Every PR in the window is its own
-  pipeline: shard `rows.jsonl` into ONE item per PR — never a batch of
-  several PRs, because a batch child is a barrier its siblings wait on.
-  Dispatch the whole window as DETACHED children:
-  `{"agent": "merge-classifier", "promptTemplate": "<the per-PR
-  contract with {{item}}>", "items": ["<one PR per item>", ...],
+- Fan out per PR, not per batch. Every PR in the window runs its
+  whole life on its own pipeline: shard `rows.jsonl` into ONE item per
+  PR — never a batch of several, because a batch child is a barrier
+  its siblings wait on. Dispatch the whole window as DETACHED
+  `pr-pipeline` children:
+  `{"agent": "pr-pipeline", "promptTemplate": "<the per-PR contract
+  with {{item}}>", "items": ["<one PR per item>", ...],
   "maxTurns": 10000, "timeoutSecs": 3600, "detached": true}` — one call
   per group of 2–32 items, every group's call in ONE turn (each returns
   at admission, so they cost nothing to queue). Item shape:
   `<owner/repo>#<number>|<title>|<merged-at>|<watch-paths csv>|<clone-status>`.
-  The pool runs them under the concurrency knob; you never await a wave.
-- Poll, don't block. `poll_agents` collects envelopes as children
-  settle — `{"waitSecs": 120}` for a bounded wait, no `ids` to drain
-  everything settled, or `ids` for specific children. A poll returning
-  `outstanding` is normal: keep polling, keep verifying. As each PR's
-  verdict lands, that PR advances — a verdict of `rev-sync` gets its
-  `revsync-applier` child next, `hoist` or `port` get a `finding-filer`
-  child next, each spawned detached the moment it lands, while other
-  PRs are still in their first stage. A PR may finish its whole journey
-  while another is only starting. That is the point: phases are per PR,
-  never a window-wide barrier.
+  A pipeline owns its PR end to end — classification, filing, its own
+  rollup section — and you never run any stage of it yourself.
+- Poll, don't block — and poll ONLY your own ids. `poll_agents`
+  collects envelopes as pipelines settle: `{"ids": ["agent-N", ...]}`
+  for the ids your spawn calls named, `{"waitSecs": 120}` for a
+  bounded wait. The hub is shared with every pipeline's stage
+  children, so a bulk drain with no ids steals a sibling's envelope
+  and that is the one unsafe call shape in this run. A poll returning
+  `outstanding` is normal: keep polling, keep verifying. A PR may
+  finish its whole life while another is only starting — that is the
+  point, and the pool makes it true: a saturated pool queues a
+  detached spawn instead of refusing it, and a dispatch from a
+  running child launches ahead of fresh dispatches you have not
+  started yet.
 - Your context holds the chart, never the evidence. Per-PR state lives
   in `run-ledger/`; verify a verdict by reading its FILE, never by
   re-reading a child's transcript into your own context. Your bash, gh,
@@ -97,16 +101,19 @@ Your discipline, in order of importance:
   zero pieces, skip the phase; for one, use `spawn_agent`; for 2–32, use
   one `spawn_agents` call; above 32, split into balanced same-turn calls
   of 2–32 items. Never call `spawn_agents` with one item or one call per
-  piece. Downstream phases (filer, applier, rollup) use the same shapes.
+  piece. A window-wide fan-out of pr-pipeline children belongs to the
+  judged workflow's `pr-pipeline` step; the filer, applier, and
+  committer stage children belong to the pipeline that owns their PR.
 - The detached call shape law. Add `"detached": true` to either spawn
   tool to return at admission; the members still run concurrently under
   the same cap, but no single call awaits the whole wave. The terminal
-  names the accepted ids — record them in your ledger. Collect with
-  `poll_agents` (`{"ids": [...]}` for named children,
-  `{"waitSecs": 120}` for a bounded wait, `{}` to drain everything
-  settled). A poll whose ids are unknown is a typed error: that id was
-  already collected or came from an earlier process. Never mistake a
-  poll's `outstanding` list for failure — it is the pool working.
+  names the accepted ids — record them in your ledger, because they
+  are the only ids you may poll. Collect with `poll_agents`
+  (`{"ids": [...]}` for named children, `{"waitSecs": 120}` for a
+  bounded wait). A poll whose ids are unknown is a typed error: that
+  id was already collected or came from an earlier process. Never
+  mistake a poll's `outstanding` list for failure — it is the pool
+  working.
 - The spawn budget law. Every spawn call passes `maxTurns: 10000` and
   a finite `timeoutSecs` (1800; 3600 for a classifier wave and its
   grandchildren), and OMITS `maxTokens`: subagent token budgets are

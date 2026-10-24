@@ -8,8 +8,8 @@ artifact. One diagram per concept; nothing here invents entities.
 Two modes are drawn here. **Mission mode** (sections 1–9) is today's CI default and the rollback
 path: `lib-adoption-analyst` drives the phases itself and the specialists write to GitHub directly.
 **Workflow mode** (sections 10–12) is the judged DAG in `.craft-agent/workflows/adopt-libs.md` —
-10 steps gating every GitHub write behind a panel and an appellate verdict, and running one pipeline
-per PR. Mission mode is the
+8 steps gating every GitHub write behind a panel and an appellate verdict, and running each PR's
+whole life on its own detached pipeline. Mission mode is the
 current reality; workflow mode is what the same run becomes, so where the two conflict the
 mission-mode sections describe the rollback path, not the destination.
 
@@ -61,8 +61,8 @@ not across the window. Phase 1, Phase 1b, and the digest read are scripts starte
 `scripts/launch-sweeps.sh` in one call, running concurrently — the AI never collects or clones.
 
 Under the judged workflow (section 10) the same phases become steps: `prepare` launches and verifies
-the sweeps, `pr-pipeline` runs Phase 2 as one pipeline per PR, and the specialists no longer write to
-GitHub at all.
+the sweeps, `pr-pipeline` dispatches one pipeline per PR that runs Phases 2–4 inside itself, and
+the specialists' writes sit behind the pipeline's lease and the gates.
 
 ```mermaid
 flowchart TD
@@ -84,9 +84,9 @@ The orchestrator never classifies, files, or delivers itself; the sweep is a scr
 own detached child, and each PR advances to its stage-2 child the moment its verdict is verified —
 no wave barrier between PRs, and no PR waiting on another.
 
-**Rollback-path note:** the arrows below are mission mode. Under the judged workflow the filer,
-applier, and rollup children only produce drafts in `run-ledger/`; the writes shown here move to
-the committers behind the gates of section 11.
+**Rollback-path note:** the arrows below are mission mode. Under the judged workflow the same
+children are stage children of the PR's own pipeline, each write gated by a filing lease and then by
+the pipeline-gate; see section 12.
 
 ```mermaid
 sequenceDiagram
@@ -113,18 +113,20 @@ sequenceDiagram
 
 ## 4. The subagent tree
 
-Depth 2 by design and never deeper: the orchestrator spawns children, and a per-PR child never
-spawns — the coordinator layer is gone. Every spawn carries `maxTurns: 10000` and a finite
-`timeoutSecs` (1800, or 3600 for a classifier child) and omits `maxTokens`: subagent token budgets
-are unlimited and reserve nothing, so a group's admission never depends on a slice-times-count
-reservation.
+Depth 2 by design and never deeper: the orchestrator spawns per-PR pipeline children, and each
+pipeline spawns its own stage children, which spawn nothing. Every spawn carries `maxTurns: 10000`
+and a finite `timeoutSecs` (1800, or 3600 for a classifier child) and omits `maxTokens`: subagent
+token budgets are unlimited and reserve nothing, so a group's admission never depends on a
+slice-times-count reservation.
 
 ```mermaid
 flowchart LR
-    O["lib-adoption-analyst<br/>depth 0"] --> M["merge-classifier<br/>depth 1, ONE per PR — never spawns"]
-    O --> F["finding-filer ×≤3<br/>depth 1, detached per advancing PR"]
-    O --> A["revsync-applier ×≤3<br/>depth 1, detached per advancing PR"]
-    O --> R["rollup-writer ×1<br/>depth 1, spawn_agent"]
+    O["lib-adoption-analyst<br/>depth 0"] --> PL["pr-pipeline<br/>depth 1, ONE per PR — spawns its own stages"]
+    PL --> M["merge-classifier<br/>depth 2, ONE per PR — never spawns"]
+    PL --> F["finding-filer<br/>depth 2, detached per advancing PR"]
+    PL --> A["revsync-applier<br/>depth 2, detached per advancing PR"]
+    PL --> C["finding-committer /<br/>revsync-committer<br/>depth 2, after a filing lease"]
+    O -.->|"judged workflow only"| RS["rollup-writer ×1<br/>depth 1, spawn_agent from rollup-seal"]
 ```
 
 ## 5. Inside one classification pipeline
@@ -228,21 +230,19 @@ timeline
 
 ## 9. The subagent budget
 
-At most 1024 subagents per run, and at most 48 concurrent tree-wide (the scan's knob is a
+At most 4096 subagents per run, and at most 48 concurrent tree-wide (the scan's knob is a
 deliberate bound, not a ceiling: each child is a full runner with its own context and provider
-stream, and the job's runner has 7 GB — the hub queues the rest FIFO, so the window's per-PR
-pipelines still all progress, just 48 at a time). The reserve covers the stage-2 filers and
-appliers, the rollup child, and retries; the rest is per-PR classifier children, and their token
-budgets are unlimited (only the run's own budget guards). Beyond the cap the run classifies
-newest-first and reports the unclassified count as an exception.
+stream, and the job's runner has 7 GB). A saturated pool queues detached spawns rather than
+refusing them, and a dispatch from a running pipeline launches ahead of fresh dispatches, so every
+PR's next stage runs the moment a slot frees. Token budgets stay unlimited (only the run's own
+budget guards); every spawn carries a finite wall clock.
 
 **Rollback-path note:** this pie is mission mode's pool. Under the judged workflow the engine
-sequences the 10 steps itself (`max-concurrent-steps: "4"`) and `pr-pipeline` dispatches its
-detached per-PR pool, bounded instead by the run's `max-total-turns: "10000"` and
-`max-total-tokens: "100000000"` pool.
+sequences the 8 steps itself (`max-concurrent-steps: "4"`) and `pr-pipeline` dispatches its detached
+per-PR pool, bounded by the same 4096-per-run cap and the run's `max-total-turns: "10000"`.
 
 ```mermaid
-pie showData title Subagents within the 1024-per-run cap
+pie showData title Subagents within the 4096-per-run cap
     "Per-PR classifier children (detached pool)" : 228
     "Filers + appliers" : 6
     "Rollup child + retry reserve" : 22
@@ -250,136 +250,143 @@ pie showData title Subagents within the 1024-per-run cap
 
 ---
 
-## 10. The judged workflow — the 10-step DAG, one pipeline per PR
+## 10. The judged workflow — the 8-step DAG, one pipeline per PR
 
 Workflow mode lives in `.craft-agent/workflows/adopt-libs.md` (frontmatter `name: adopt-libs`, arg
 `window` default `7h`) — the same scan, but the engine sequences the steps instead of the
-orchestrator, and every GitHub write sits behind a verdict. Limits: `max-steps: "12"`,
+orchestrator, and every GitHub write sits behind a verdict. Limits: `max-steps: "10"`,
 `max-concurrent-steps: "4"`, `max-total-turns: "10000"`, `max-total-tokens: "100000000"`,
 `max-retries-per-step: "2"`. Every step states `max-turns`, `retry`, and `on-failure` explicitly —
 never relying on the 25/0/stop defaults.
 
-The shape: a scripted parallel sweep (`prepare`), one per-PR pipeline step (`pr-pipeline`), one
-merged judge family (`pipeline-gate`, `pipeline-appeal`), two committers that need only the appeal
-(`file-commit`, `bump-commit`), and the rollup island (`rollup-draft`, `rollup-gate`,
-`rollup-appeal`, `rollup-commit`) that starts the moment `prepare` settles. Only success releases
-dependants, so what happens after a failure depends on that step's `on-failure`.
+The shape: a scripted parallel sweep (`prepare`), one per-PR dispatch step (`pr-pipeline`), one
+merged judge family (`pipeline-gate`, `pipeline-appeal`), and the seal island (`rollup-seal`,
+`rollup-gate`, `rollup-appeal`, `rollup-commit`) that starts the moment `pr-pipeline` settles and
+waits for both appeals before its single write. Only success releases dependants, so what happens
+after a failure depends on that step's `on-failure`.
 
-What changed from the 16-step shape and why: `classify`, `file-draft`, and `bump-draft` collapsed
-into `pr-pipeline` because a per-PR pipeline is not a phase — every PR's journey is its own, and a
-PR may finish while another is only in its first stage. The gates merged for the same reason: one
-judge family verifies the whole per-PR output, exhaustive only on the ≤3 findings and ≤3 bumps that
-can actually be filed, sampled elsewhere.
+What changed from the 10-step shape and why: the write lanes collapsed INTO the pipelines. A PR's
+whole life — classification, filing, and its own rollup section — now runs inside one detached
+`pr-pipeline` child, so `file-commit`/`bump-commit`/`rollup-draft` are no longer steps: the
+commsitters and the rollup-writer are stage children the pipeline itself spawns. The step's job
+shrank to dispatching the window's pipelines, polling only its own ids, verifying their
+deliverables, and naming exceptions. The gates stayed: one judge family audits the whole per-PR
+output — every PR has a row, the filing leases honored the ≤3/≤3 caps, the filed issues and opened
+PRs match their verified drafts — and the seal is one single-writer commit.
 
 **Failure policy — schema-enforced, not a preference.** A step the run survives a failure of
 (`skip` or `warn`) must be a leaf: the workflow schema forbids `skip`/`warn` on a step that has
-dependants, or the pipeline stalls. So every step anything depends on is `stop`, and only the three
-leaf committers — nothing needs them — are `skip`. A gate that settles failed therefore halts
+dependants, or the pipeline stalls. So every step anything depends on is `stop`, and only
+`rollup-commit` — nothing needs it — is `skip`. A gate that settles failed therefore halts
 admissions: the run ends `Failed` (exit 1 on a step error, 2 on max-turns, 3 on budget), its
-committers settle as skipped with a named `DependencyFailed` reason (journaled, never silent), and
-the next run heals from the prior state body. A skipped *committer* still records the failure (the
-run is `Failed`), but in-flight sibling branches keep running, so their terminal rows reach the
-rollup's exception list — that is the audit trail for a failed lane.
+dependants settle as skipped with a named `DependencyFailed` reason (journaled, never silent), and
+the next run heals from the prior state body.
 
-`rollup-draft` composes the snapshot from the terminal `run-ledger/outcomes/*.md` rows and the
-journal — skipped steps become named exceptions, never silence — with a bounded wait (≤45 min) for
-the file and bump lanes, and never claims an artifact it cannot verify. `pr-pipeline` carries the
-heaviest budget (1200 turns): one detached child per PR, then polls as each verdict lands and
-advances that PR immediately, so a `rev-sync` PR gets its applier while a `hoist` PR three hundred
-rows down is still fetching files.
+`rollup-seal` composes the state snapshot from the pipelines' per-PR sections under
+`run-ledger/rollup/<slug>.md`, the outcome rows, and the journal — a missing section is a named
+exception, never a guess — with a bounded wait (≤45 min) for the file and bump lanes. `pr-pipeline`
+carries the heaviest budget (1200 turns): one detached child per PR, then polls as each pipeline's
+envelope lands and verifies its ledger, verdict file, packages, and outcome rows.
 
 ```mermaid
 flowchart TD
-    P["1 prepare — lib-adoption-analyst<br/>scripts/launch-sweeps.sh: collection, clone sweep,<br/>verdict-digest read — all concurrent"] --> Q["2 pr-pipeline — lib-adoption-analyst<br/>one DETACHED child per PR; poll_agents as each verdict lands;<br/>that PR advances to its stage-2 child immediately"]
+    P["1 prepare — lib-adoption-analyst<br/>scripts/launch-sweeps.sh: collection, clone sweep,<br/>verdict-digest read — all concurrent"] --> Q["2 pr-pipeline — lib-adoption-analyst<br/>one DETACHED pr-pipeline child per PR;<br/>each child owns that PR's whole life"]
     Q --> PG{"3 pipeline-gate<br/>verdict-judge, panel 3, majority"}
     PG -->|pass| PA{"4 pipeline-appeal<br/>appellate-judge, panel 1, unanimous"}
 
-    subgraph writes["write lanes — need only the appeal"]
+    subgraph seal["seal island — steps 5-8"]
         direction TB
-        FC["5 file-commit — finding-committer"]
-        BC["6 bump-commit — revsync-committer"]
-    end
-
-    subgraph rollup["rollup island — steps 7-10"]
-        direction TB
-        RD["7 rollup-draft — lib-adoption-analyst"] --> RG{"8 rollup-gate<br/>verdict-judge, panel 3, majority"}
-        RG -->|pass| RA{"9 rollup-appeal<br/>appellate-judge, panel 1, unanimous"}
-        RA -->|uphold| RC["10 rollup-commit — rollup-committer"]
+        RS["5 rollup-seal — lib-adoption-analyst<br/>compose per-PR sections + outcomes"] --> RG{"6 rollup-gate<br/>verdict-judge, panel 3, majority"}
+        RG -->|pass| RA{"7 rollup-appeal<br/>appellate-judge, panel 1, unanimous"}
+        RA -->|uphold| RC["8 rollup-commit — rollup-committer<br/>needs BOTH appeals"]
         RG -.->|"fail: gate stops the run (skips below it, named)"| RC
     end
 
-    P -->|"needs: prepare only"| RD
-    PA -->|uphold| FC
-    PA -->|uphold| BC
-    PG -.->|"fail: run stops; both write lanes settle skipped (DependencyFailed)"| FC
+    Q -->|"needs: pr-pipeline only"| RS
+    PA -->|"uphold: the seal may post"| RC
+    PG -.->|"fail: run stops; the seal settles skipped (DependencyFailed)"| RC
 ```
 
-The dotted edge shows what a failed gate does: admissions halt, and everything below it settles as
-skipped with a named `DependencyFailed` reason — the committers never run, the rollup island
-finishes if already in flight, and the run's conclusion is `Failed` with the journal carrying every
-reason.
+The dotted edges show what a failed gate does: admissions halt, and everything below it settles as
+skipped with a named `DependencyFailed` reason — the seal never posts, and the run's conclusion is
+`Failed` with the journal carrying every reason.
 
-## 11. One pipeline — per PR, detached, never blocked by a wave
+## 11. One pipeline — per PR, a whole life, never blocked by a sibling
 
 `pr-pipeline` is the step the per-PR architecture lives in. It shards `rows.jsonl` into ONE item per
-PR and dispatches the whole window as detached children: every group's `spawn_agents` call carries
-`"detached": true`, so it returns at admission and the pool runs the members under the concurrency
-knob while the orchestrator does other work. No call awaits a wave, so no PR waits for another.
+PR and dispatches the whole window as detached `pr-pipeline` children: every group's `spawn_agents`
+call carries `"detached": true`, so it returns at admission and the pool runs the members under the
+concurrency knob. Each child then runs its PR's ENTIRE life inside itself, spawning its own stage
+children detached and polling only its own ids. A PR may finish its whole life — classification,
+filed issue, rollup section — while another PR is still in its first stage.
+
+The pool makes that true at window scale. A saturated pool QUEUES a detached spawn instead of
+refusing it (the caller already returned at admission), and a dispatch from a running child — a
+continuation — launches ahead of fresh dispatches the root parent has not started, so a PR's next
+stage never waits behind pipelines that have not begun. Every parent polls ONLY the ids its own
+spawn calls named: the hub is shared, and a bulk drain would steal a sibling's envelope.
 
 ```mermaid
 sequenceDiagram
     participant O as pr-pipeline (orchestrator)
     participant Pool as subagent pool (cap 48)
-    participant A as PR #41 (rev-sync)
-    participant B as PR #900 (hoist)
-    participant C as PR #1200 (irrelevant)
+    participant A as PR #41 pipeline (rev-sync)
+    participant B as PR #900 pipeline (hoist)
+    participant C as PR #1200 pipeline (irrelevant)
 
-    O->>Pool: spawn_agents merge-classifier detached, 22 groups of 32
+    O->>Pool: spawn_agents pr-pipeline detached, groups of 2..32, one turn
     Pool-->>O: accepted ids (immediate — no await)
-    O->>O: poll_agents waitSecs 120
+    O->>O: poll_agents by explicit ids, waitSecs 120
+    A->>Pool: spawn_agent merge-classifier for #41 (detached, continuation)
+    B->>Pool: spawn_agent merge-classifier for #900 (detached, continuation)
+    C->>Pool: spawn_agent merge-classifier for #1200 (detached, continuation)
     Pool->>C: fetch files, no watch-path hit
     C-->>Pool: verdict: irrelevant
-    Pool-->>O: poll collects #1200 → verified, journey ends
+    C->>C: rollup section + ledger row — journey ends
+    Pool-->>O: poll collects #1200 → verified, done
     Pool->>A: fetch files, Cargo.lock pin bump
     A-->>Pool: verdict: rev-sync
-    Pool-->>O: poll collects #41 → verified
-    O->>Pool: spawn_agent revsync-applier for #41 (detached)
-    Note over A,B: #41's stage 2 starts while #900 is<br/>still in its FIRST stage
+    A->>Pool: scripts/filing-lease.sh bump <slug> — leased
+    A->>Pool: spawn_agent revsync-applier (detached) → revsync-committer (detached)
+    Note over A,B: #41 is filed and finished while #900 is<br/>still in its FIRST stage — by design
     Pool->>B: fetch files, generic logic in src/
     B-->>Pool: verdict: hoist
-    Pool-->>O: poll collects #900 → verified
-    O->>Pool: spawn_agent finding-filer for #900 (detached)
+    B->>Pool: scripts/filing-lease.sh finding <slug> — leased
+    B->>Pool: spawn_agent finding-filer (detached) → finding-committer (detached)
+    B->>B: rollup section + ledger row — journey ends
 ```
 
-What the shape buys, and what it costs. Bought: a PR's journey never waits on a sibling, the
-wall-clock reclaims one child without stalling 47 others, and each child's context holds one PR's
-evidence instead of a batch of six. Cost: the orchestrator tracks ~N PRs, which is why per-PR state
-lives in `run-ledger/` and its context holds the chart — it verifies a verdict by reading the
-child's FILE, never by re-reading the envelope into its own context.
+What the shape buys, and what it costs. Bought: a PR's whole life never waits on a sibling; the
+wall-clock reclaims one child without stalling 47 others; each pipeline's context holds one PR's
+journey instead of a window's; the filing lease keeps the ≤3/≤3 caps honest without a ranking
+barrier. Cost: each pipeline tracks its own stage children, which is why per-PR state lives in
+`run-ledger/pipeline/` and a pipeline's context holds only its own chart — it verifies a stage
+child by reading its FILE, never by re-reading the envelope into its own context.
 
-## 12. The draft/commit split
+## 12. The pipeline's own writes — leased, then committed
 
-The stage-2 drafters and the committers are different agents. The drafters keep the judgment and
-lose the write: `finding-filer` writes `run-ledger/filer/<slug>/draft.md` plus its evidence bundle
-and returns `ready <slug>` / `already-filed` / `already-tracked` / `refused` / `blocked`;
-`revsync-applier` clones, branches, and commits pin lines locally — never pushes — writing
-`run-ledger/revsync/<slug>/branch.md` and the PR body and returning `ready` / `already-open #N` /
-`blocker`; `rollup-writer` composes `run-ledger/rollup/target.md`, `state-body.md`, and
-`comment.md` and writes nothing to GitHub. The judges re-verify those drafts live. Only then do the
-committers — deliberately mechanical, because the intelligence is gated upstream — perform the
-run's only GitHub writes, each idempotently so a retry can never duplicate an issue.
+The stage-2 drafters and the committers are different agents, and they are all stage children of
+the pipeline that owns the PR. `finding-filer` writes `run-ledger/filer/<slug>/draft.md` plus its
+evidence bundle and returns `ready <slug>` / `already-filed` / `already-tracked` / `refused` /
+`blocked`; `revsync-applier` clones, branches, and commits pin lines locally — never pushes —
+writing `run-ledger/revsync/<slug>/branch.md` and the PR body and returning `ready` /
+`already-open #N` / `blocker`. BEFORE any committer runs, the pipeline takes its lease from
+`scripts/filing-lease.sh` — `flock`-guarded, at most 3 findings and 3 bumps per window — and an
+over-cap PR defers with its reason recorded. Only then do the committers perform the writes, each
+idempotently so a retry can never duplicate an issue; the judges re-verify the result live
+afterward.
 
 ```mermaid
 flowchart LR
-    subgraph drafts["stage-2 drafts — run-ledger/ only, no GitHub writes"]
-        FO["run-ledger/filer/<slug>/<br/>draft.md + evidence bundle"]
-        BO["run-ledger/revsync/<slug>/<br/>branch.md + pr-body.md, never pushed"]
-        RO["run-ledger/rollup/<br/>target.md + state-body.md + comment.md"]
+    subgraph pipeline["one pr-pipeline child (depth 1)"]
+        direction TB
+        CL["merge-classifier<br/>pr-<number>.verdict"] --> |"rev-sync / hoist / port"| DR{"stage-2 drafter<br/>detached, continuation-priority"}
+        DR --> |"over-cap: defer"| DEF["deferred —named in the rollup section"]
+        LEASE["scripts/filing-lease.sh<br/>flock, ≤3 findings, ≤3 bumps"] --> |"leased"| COMM["finding-committer /<br/>revsync-committer"]
+        DR --> |"package verified"| LEASE
     end
-    FO -->|"ready / already-tracked / refused / blocked"| G{"pipeline-gate then pipeline-appeal<br/>verdict-judge panel 3 majority,<br/>appellate-judge panel 1 unanimous"}
-    BO -->|"ready / already-open / blocker"| G
-    RO -->|"drafts + exception list"| G
-    G -->|"passed"| C{"file-commit / bump-commit / rollup-commit<br/>check-before-create, write byte-identically, verify"}
-    C --> W["the lane's only GitHub write:<br/>finding issue, pin-bump PR, tracking-issue body + comment"]
-    C --> OUT["run-ledger/outcomes/<br/>file-<slug>.md, bump-<slug>.md, rollup.md"]
+    COMM --> W["the lane's only GitHub writes:<br/>finding issue on craft-libs,<br/>pin-bump PR on the app repo"]
+    COMM --> OUT["run-ledger/outcomes/<br/>file-<slug>.md, bump-<slug>.md"]
+    CL --> SEC["run-ledger/rollup/<slug>.md<br/>this PR's own section"]
+    COMM --> SEC
 ```

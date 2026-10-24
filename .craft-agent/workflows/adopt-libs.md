@@ -1,10 +1,10 @@
 ---
 name: adopt-libs
-description: "6h craft-libs adoption scan: sweep in parallel, then run every PR as its own pipeline."
+description: "6h craft-libs adoption scan: a scripted parallel sweep, then every PR's whole life on its own pipeline, and one seal."
 args:
   window: { type: string, default: "7h" }
 limits:
-  max-steps: "12"
+  max-steps: "10"
   max-total-turns: "10000"
   max-total-tokens: "100000000"
   max-retries-per-step: "2"
@@ -61,71 +61,67 @@ steps:
     max-turns: "1200"
     retry: "1"
     on-failure: stop
-    outputs: [verdict-files, draft-paths, branch-packages, pipeline-exceptions]
+    outputs: [pipeline-rows, filed-issues, opened-prs, deferred, pipeline-exceptions]
     body: |
-      Execute the per-PR pipelines: every PR in the window is its own
-      pipeline, and no PR ever waits on another.
+      Every PR in the window runs its ENTIRE life on its own pipeline —
+      classification, filing, and its own rollup section — and no PR
+      ever waits on another. You dispatch and verify; the pipelines do
+      the life.
 
       - Shard `run-ledger/prepare/rows.jsonl` into ONE item per PR —
-        never a batch of several PRs, because a batch child is a
-        barrier its siblings wait on. Item shape:
+        never a batch of several, because a batch child is a barrier
+        its siblings wait on. Item shape:
         `<owner/repo>#<number>|<title>|<merged-at>|<watch-paths csv>|<clone-status>`,
         titles stripped of `|` and `;`, watch-paths from
         `config/repo-list.txt`, clone-status from prepare's outcome
-        lines (`ok` / `ok-degraded` / `blocked`).
-      - WAVE 1 — classification, detached and unbounded: turn one
-        issues every group's call in ONE turn —
-        `{"agent": "merge-classifier", "promptTemplate": "<per-PR
-        contract carrying {{item}} plus its verdict-file path, its
-        ledger path, its repo's watch-paths and clone-status, the
-        classification rules, the packaging rule, the verdict-file
-        contract, and the read-only-gh law>", "items": ["<one PR per
+        lines (`ok` / `ok-degraded` / `blocked`). Order items
+        newest-first, so any dispatch that cannot start at once runs
+        newest-first too.
+      - DISPATCH — one `pr-pipeline` child per PR, DETACHED, every
+        group's call in ONE turn: `{"agent": "pr-pipeline",
+        "promptTemplate": "<the per-PR contract carrying {{item}}, its
+        verdict-file path, its ledger path, its rollup-section path,
+        its repo's watch-paths and clone-status, the scope-truth clone
+        path, and the read-only-gh law>", "items": ["<one PR per
         item>", ...], "maxTurns": 10000, "timeoutSecs": 3600,
         "detached": true}` — one call per group of 2..=32 items, every
         group in the same turn, because each returns at admission. Use
         `spawn_agent` (also `detached: true`) for a single-PR group;
-        NEVER a one-item `spawn_agents` call. Omit `maxTokens`.
-      - POLL AND ADVANCE — this is the step's core loop, not a phase
-        boundary: call `poll_agents` with `{"waitSecs": 120}` (or `{}`
-        to drain what settled, or `ids` for named children). A poll
-        returning `outstanding` is normal. As each verdict lands:
-        read that PR's verdict FILE (never the envelope alone), verify
-        its line shape and its cited evidence, record its ledger row —
-        and if the verdict is actionable, that PR advances to its next
-        stage IMMEDIATELY, detached, while other PRs are still in wave 1
-        or their own stage 2: `rev-sync` → one `revsync-applier` child
-        (`spawn_agent`, `detached: true`, `timeoutSecs: 1800`,
-        `maxTurns: 10000`); `hoist` or `port` → one `finding-filer`
-        child, same shape. Zero items skips that stage; one item uses
-        the single tool. A PR may finish its whole journey here while
-        another is only starting — that is the design, not a race.
-      - VERIFY per PR, in ledger order: every verdict file exists with
-        the contract's one-line shape; every draft package
-        (`run-ledger/filer/<slug>/draft.md` + `evidence-bundle.md`) and
-        branch package (`run-ledger/revsync/<slug>/branch.md` + diff)
-        exists and cites only evidence you verified this window or a
-        carry-forward. A child that returned without its deliverable is
-        re-spawned ONCE with a narrowed prompt keeping its ORIGINAL
-        caps; a second failure is a named exception, never a silent gap,
-        and never a reason to redo its work yourself.
+        NEVER a one-item `spawn_agents` call. Omit `maxTokens`. The
+        promptTemplate MUST carry the literal `{{item}}`. A saturated
+        pool QUEUES these calls — a typed refusal is a call-shape bug
+        to fix on the next turn, never a reason to do a pipeline's
+        work yourself.
+      - THE POLL LAW — poll ONLY by explicit ids. The hub is shared
+        with every pipeline's stage children, so a bulk drain collects
+        your pipelines' siblings' envelopes and steals them. Record
+        every accepted id in your ledger; poll `{"ids": [...]}` for
+        named pipelines and `{"waitSecs": 120}` for a bounded wait.
+        A poll returning `outstanding` is normal state.
+      - VERIFY per PR, in ledger order: each pipeline's ledger row
+        under `run-ledger/pipeline/` names its children and their
+        deliverables; the verdict file it named exists with the
+        contract's one-line shape; every draft package, branch
+        package, outcome row, and rollup section it claimed exists and
+        cites only evidence verified this window or a carry-forward. A
+        pipeline that returned without its deliverables is re-spawned
+        ONCE with a narrowed prompt keeping its ORIGINAL caps; a
+        second failure is a named exception, never a silent gap.
       - THE WALL-CLOCK LAW — never `timeoutSecs: 0`. The clock
-        reclaiming a child is a named exception row (its id, its shard,
-        its stage), never a lost PR: re-spawn it once under the retry
-        rule above.
-      - RANK for the gates: from the verified verdicts, `rev-sync` first,
-        then `hoist`, then `port`. At most 3 findings and 3 bump
-        candidates can be FILED. Over-cap and maturing candidates stay
-        recorded as deferred — never filed, never invented. Apply the
-        parked-candidate exemption against prepare's digest: a
-        candidate whose closed finding was parked with revival
-        conditions is not re-filed unless a named condition is
-        demonstrably met this window, and the record cites which.
+        reclaiming a child is a named exception row (its id, its
+        shard, its stage), never a lost PR: re-spawn it once under the
+        retry rule above.
+      - THE FILING CAP — the mission files at most 3 findings and 3
+        bump candidates per window. Each pipeline takes its lease from
+        `scripts/filing-lease.sh` before any write, so the cap holds
+        without a ranking barrier here. Over-cap PRs defer and are
+        named in the rollup sections you verify — never invented, and
+        never un-filed after the fact.
 
-      Final message: the verdict-file paths by class, the ranked
-      ≤3 findings and ≤3 bump candidates with their evidence, the
-      deferred list with reasons, every exception by name, and the count
-      of PRs still outstanding when the step's turn budget forced the
-      final message.
+      Final message: per-PR rows by class, the filed issues and opened
+      PRs with their numbers, the deferred list with reasons, every
+      exception by name, and the count of PRs still outstanding when
+      the step's turn budget forced the final message.
 
   - id: pipeline-gate
     agent: verdict-judge
@@ -141,38 +137,40 @@ steps:
       merge: majority
       max-feedback: "2"
     body: |
-      Judge the per-PR pipeline's output against these rubrics ONLY.
+      Judge the per-PR pipelines' output against these rubrics ONLY.
       Counting is ARITHMETIC — one bash pass of `find`/`wc`/`grep -c`
       over the ledger, never file-by-file reading. Live re-verification
       is SAMPLED — at most three GitHub reads across the whole rubric,
       on the artifacts whose class carries the most risk. Budget
       yourself 40 tool calls.
 
-      1. REAL VERDICTS: one `pr-<number>.verdict` exists per PR
-         `pr-pipeline`'s final message names, under
-         `run-ledger/classifier/`. Count with one `find | wc -l`; the
-         count equals the PR count the message reports.
+      1. EVERY PR HAS A ROW: one `pr-<number>.verdict` exists per PR
+         in `run-ledger/prepare/rows.jsonl`, or the pipeline's ledger
+         row names it as a re-spawn-once exception or a clock
+         reclaim. Count with one `find | wc -l`; the count plus the
+         named exceptions equals the PR count.
       2. COUNTS EQUAL: the per-class counts the step reports match one
          `grep -c` per class over the verdict files. Arithmetic, not
          reading.
-      3. LIVE SPOT-CHECKS (at most three PRs): pick two `hoist` and one
-         `port` verdict. Re-verify live, read-only: the changed-file
-         list (`gh api .../pulls/<n>/files`) and the patch for the
-         files the verdict cites; the PR resolves state=closed
-         merged=true. The verdict's `files evidence` matches the live
-         list. Three PRs, not thirty.
-      4. CLONES MATCH: prepare's clone outcome lines match `sources/` —
+      3. WRITES ARE LICENSED: the filing lease files
+         (`run-ledger/filing/finding.lease`, `bump.lease`) hold at
+         most 3 slugs each; every filed issue or opened PR names a
+         slug on its lease; a slug off its lease or a fourth finding
+         fails the whole step.
+      4. LIVE SPOT-CHECKS (at most three PRs): pick two filed findings
+         and one opened bump PR. Re-verify live, read-only: the issue
+         or PR resolves by number, its body matches the verified draft
+         or branch package, and the PR it cites resolves state=closed
+         merged=true. Three PRs, not thirty.
+      5. CLONES MATCH: prepare's clone outcome lines match `sources/` —
          each `ok` directory populated with a resolvable HEAD,
          degraded/blocked repos present as exceptions. One bash loop
          over the outcome lines.
-      5. NO WRITES CLAIMED: no verdict file, draft, or branch package
-         contains evidence of a GitHub write by a classifier or a
-         stage-2 child. A write before the gate fails the whole step.
-      6. RANK HONEST: the ≤3 findings and ≤3 bump candidates the step
-         names exist as packages; over-cap items appear as deferred,
-         never as filed; the parked-candidate exemption is applied
-         against the digest (a parked candidate is not re-filed unless
-         its named condition is met and cited).
+      6. NO OUT-OF-SCOPE WRITES: no verdict file, draft, branch
+         package, or outcome row contains evidence of a GitHub write
+         beyond finding issues on ahmedhosnypro/craft-libs, the
+         tracking issue, and pin-bump branches/PRs on app repos. A
+         write before the gate outside that set fails the whole step.
 
       Return the verdict JSON: {"verdict":"pass"|"fail","issues":["..."]} —
       your final message must be that JSON and NOTHING else: no prose,
@@ -193,78 +191,31 @@ steps:
       merge: unanimous
       max-feedback: "0"
     body: |
-      Re-derive the pipeline-gate rubric yourself — real verdicts,
-      counts equal, live spot-checks, clones match, no writes claimed,
-      rank honest — read the artifacts and re-verify live, GET-only,
-      under THE JUDGE ECONOMY LAW: counting is one bash pass, live
-      re-verification samples at most two PRs, and 40 tool calls is
-      your budget. Do not count votes: a panel verdict you cannot
-      reproduce from evidence is overturned, and a unanimous panel of
-      thin verdicts is exactly what you exist to catch. Requests
-      outside the rubric are not grounds for failure.
+      Re-derive the pipeline-gate rubric yourself — every PR has a
+      row, counts equal, writes are licensed, live spot-checks,
+      clones match, no out-of-scope writes — read the artifacts and
+      re-verify live, GET-only, under THE JUDGE ECONOMY LAW: counting
+      is one bash pass, live re-verification samples at most two PRs,
+      and 40 tool calls is your budget. Do not count votes: a panel
+      verdict you cannot reproduce from evidence is overturned, and a
+      unanimous panel of thin verdicts is exactly what you exist to
+      catch. Requests outside the rubric are not grounds for failure.
 
       Return the verdict JSON: {"verdict":"pass"|"fail","issues":["..."]}.
 
-  - id: file-commit
-    agent: finding-committer
-    needs: [pipeline-appeal]
-    max-turns: "120"
-    retry: "1"
-    on-failure: skip
-    outputs: [issue-rows]
-    body: |
-      The appeal above passed. File the FINDINGS the gate passed:
-
-      - For every slug the gate's issues named ready with a draft at
-        `run-ledger/filer/<slug>/draft.md`, execute your profile exactly:
-        check by exact title first, then `gh issue create --repo
-        ahmedhosnypro/craft-libs --title "adoption-scan: <slug>"
-        --body-file` the byte-identical draft, verify by number, write
-        run-ledger/outcomes/file-<slug>.md.
-      - Never file a slug named refused or blocked, a slug whose draft
-        is missing, an over-cap or deferred slug, or anything the gate
-        did not pass.
-      - Refused, blocked, and deferred findings file nothing and stay
-        recorded for the state body — your final message lists them as
-        such.
-
-      Final message: one line per slug (filed / already-filed /
-      blocked) plus the skipped slugs and why.
-
-  - id: bump-commit
-    agent: revsync-committer
-    needs: [pipeline-appeal]
-    max-turns: "120"
-    retry: "1"
-    on-failure: skip
-    outputs: [pr-rows]
-    body: |
-      The appeal above passed. Push and open the pull requests the gate
-      passed:
-
-      - For every slug the gate named ready with a branch package at
-        run-ledger/revsync/<slug>/, execute your profile exactly: check
-        for an open PR on that branch first, then push with the
-        environment-carried auth, then `gh pr create` from the recorded
-        title and body, verify by number, write
-        run-ledger/outcomes/bump-<slug>.md.
-      - Never push or open anything the gate did not pass, a slug named
-        blocker or already-open, a deferred slug, or a package that is
-        missing.
-
-      Final message: one line per slug (opened #N / already-open #N /
-      blocked) with pin rev and behind-HEAD count.
-
-  - id: rollup-draft
+  - id: rollup-seal
     agent: lib-adoption-analyst
-    needs: [prepare]
+    needs: [pr-pipeline]
     max-turns: "300"
     retry: "1"
     on-failure: stop
     outputs: [delivery-drafts, target-plan]
     body: |
-      Compose the delivery drafts for this window — this step needs only
-      prepare, so it runs whatever happened to the gated branches:
+      Compose the delivery drafts from what the pipelines wrote. Each
+      PR's pipeline ends with its own rollup section under
+      `run-ledger/rollup/<slug>.md`; this step needs only pr-pipeline,
+      so it composes whatever settled — a section that is still
+      missing is an exception, never a guess.
 
       - BOUNDED WAIT: poll the run journal
         (.craft-agent/workflows/<run_id>/journal.jsonl) and the outcome
@@ -272,12 +223,12 @@ steps:
         the file and bump branches reach terminal state — settled,
         failed, or skipped-with-reason. Anything still non-terminal at
         the deadline becomes an exception row, never a claim.
-      - Compose the state snapshot from what IS terminal: the outcome
-        rows (file-<slug>, bump-<slug>), the pr-pipeline's ranked
-        findings and bump candidates with their per-PR verdict
-        evidence, prepare's clone outcomes and verdict digest, and every
-        journal skip with its DependencyFailed reason (exceptions —
-        named, never silent).
+      - Build the snapshot with bash, in ONE pass — counting and
+        concatenation, never per-file reading: every rollup section,
+        prepare's clone outcomes and verdict digest, the outcome rows
+        (file-<slug>, bump-<slug>), the pipeline ledger's exception
+        rows, and the prior Mission State body. A missing section is
+        an exception naming its PR.
       - Dispatch once: `spawn_agent` profile rollup-writer (single
         deliverable, so the single-child tool), `maxTurns: 10000`,
         `timeoutSecs: 1800`, the prompt carrying the full snapshot and
@@ -296,7 +247,7 @@ steps:
   - id: rollup-gate
     agent: verdict-judge
     kind: judge
-    needs: [rollup-draft]
+    needs: [rollup-seal]
     max-turns: "250"
     retry: "1"
     on-failure: stop
@@ -321,9 +272,9 @@ steps:
          number (`gh api` reads on ahmedhosnypro/craft-libs and the app
          repos); carry-forwards match the prior body; unverifiable is
          `n/a (gap)`, never a guess.
-      2. EXCEPTIONS NAMED: every DependencyFailed skip in the journal
-         for this run appears as an exception — in the body or the
-         comment — never silently absent.
+      2. EXCEPTIONS NAMED: every exception the pipeline ledger and the
+         journal record for this run appears as an exception — in the
+         body or the comment — never silently absent.
       3. COMMENT SHAPE: 3–8 lines plus one Signal line per active repo;
          an empty window is exactly three lines.
       4. ROTATION HONORED: target.md matches the live tracking issue's
@@ -361,13 +312,14 @@ steps:
 
   - id: rollup-commit
     agent: rollup-committer
-    needs: [rollup-appeal]
+    needs: [rollup-appeal, pipeline-appeal]
     max-turns: "120"
     retry: "1"
     on-failure: skip
     outputs: [delivery-rows]
     body: |
-      The appeal above passed. Execute the delivery plan the gate passed:
+      The appeals above passed. Execute the delivery plan the gate
+      passed:
 
       - Follow run-ledger/rollup/target.md exactly: create the tracking
         issue when none exists, otherwise verify it by number before
@@ -376,6 +328,9 @@ steps:
       - Write the state body and post the comment byte-identically from
         run-ledger/rollup/state-body.md and comment.md; verify both by
         ID afterward; write run-ledger/outcomes/rollup.md.
+      - Append the pipeline-gate and pipeline-appeal verdicts from this
+        run's journal to the state body's exception section: a failed
+        gate is a named exception, never a hidden one.
 
       Final message: the tracking-issue permalink, the comment
       permalink, every rotation/close action, and anything blocked.
@@ -383,9 +338,11 @@ steps:
 
 # Rules (absolute) — prepended to every step
 
-The judged adoption scan: 10 steps, a scripted parallel sweep, one
-pipeline per PR, and a merged gate. The phase contracts each step cites
-live in missions/adopt-libs.md (the phase-contract library); the
+The judged adoption scan: a scripted parallel sweep, one detached
+pipeline per PR that runs that PR's whole life — classification,
+filing, and its own rollup section — and one seal that composes the
+per-PR sections into the tracking issue. The phase contracts each step
+cites live in missions/adopt-libs.md (the phase-contract library); the
 standalone mission run stays the rollback path this workflow does not
 delete.
 
@@ -420,8 +377,8 @@ delete.
 - THE JUDGE ECONOMY LAW (every judge step obeys it): a gate settles in
   minutes or it has failed. Counting is ARITHMETIC — one bash pass of
   `find`/`wc`/`grep -c` over the ledger, never reading files one by one.
-  Live re-verification is SAMPLED — at most three GitHub reads across the
-  whole rubric, on the artifacts whose class carries the most risk.
+  Live re-verification is SAMPLED — at most three GitHub reads across
+  the whole rubric, on the artifacts whose class carries the most risk.
   Budget yourself 40 tool calls; if the rubric still needs more, the
   artifacts are not evidenced and the honest verdict is `fail` with the
   gap named.
@@ -441,9 +398,23 @@ delete.
   A rejected call means fix the call shape on the next turn — never
   re-send the same broken shape, and never fall back to doing a child's
   work yourself.
+- THE NESTED POLL LAW (every parent in this run obeys it): the hub is
+  shared by every pipeline and every stage child, so a parent collects
+  ONLY the ids its own spawn calls named. A bulk drain with no ids
+  steals a sibling pipeline's envelope. A typed unknown-id error names
+  an already-collected child — that is the loud failure, never a
+  silent loss, because the envelope's data also lives in files the
+  child wrote.
 - THE WALL-CLOCK LAW (never `timeoutSecs: 0`): every spawn call carries a
-  finite `timeoutSecs` — 1800 for a clone/filer/applier/rollup child,
+  finite `timeoutSecs` — 1800 for a filer, applier, or committer child,
   3600 for a classifier wave and its grandchildren. Token budgets stay
   UNLIMITED (omitted `maxTokens`). A child without a wall clock can hang
   the tool call that awaits it. The clock reclaiming a child is a named
   exception, never a lost run.
+- THE POOL LAW: the concurrency knob is a deliberate memory bound, not a
+  ceiling to chase. A saturated pool QUEUES a detached spawn instead of
+  refusing it, and a dispatch from a running child — a continuation —
+  launches ahead of fresh dispatches the root parent has not started,
+  so a PR's next stage never waits behind a pipeline that has not begun.
+  The blocking spawn path still refuses: its caller awaits the whole
+  wave, so a refused call is the caller's decision to retry.

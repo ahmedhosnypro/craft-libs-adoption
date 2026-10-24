@@ -90,16 +90,20 @@ from children doing serial work:
 
 ## The pool envelope (plan inside it)
 
-- Concurrency: at most 1024 subagents at once, tree-wide. Batch: 2-32 items per spawn_agents call,
-  prompts ≤ 64 KiB each.
+- Concurrency: at most 48 subagents at once, tree-wide — a deliberate memory bound
+  (CRAFT_AGENT_SUBAGENT_MAX_CONCURRENCY), not a ceiling to chase. Batch: 2-32 items per spawn_agents
+  call, prompts ≤ 64 KiB each.
 
-- Total: at most 1024 subagents per run — reserve ~30 (filer/applier/rollup, retries); per-PR
-  classifier children take the rest. Beyond that, classify newest-first and report the unclassified
-  count as an EXCEPTION. Depth: at most 4; this design uses 2 (an orchestrator and its per-PR
-  children) and must not go deeper.
+- Total: at most 4096 subagents per run (CRAFT_AGENT_SUBAGENT_MAX_TOTAL) — the window's pipelines
+  plus their stage children plus retries. Depth: at most 2; this design uses exactly 2 — the
+  orchestrator and its pr-pipeline children, each spawning its own stage children — and a
+  pipeline's stage child spawns nothing. A saturated pool QUEUES a detached spawn; a dispatch from a
+  running pipeline (a continuation) launches ahead of fresh dispatches.
 
-- Each child is independent: it shares nothing with any other child and waits on none. One PR's
-  journey may finish while another's is only starting — that independence is the design, not a race.
+- Each pipeline is independent: it shares nothing with any other pipeline and waits on none. One
+  PR's whole life — classification, filing, its rollup section — may finish while another's
+  is only starting. That independence is the design, not a race. Every parent polls ONLY the ids its
+  own spawn calls named: the hub is shared, and a bulk drain steals a sibling's envelope.
 
 - Every agent follows the vendored pooled-missions skill (.agents/skills/pooled-missions/SKILL.md):
   own ledger at the path the prompt names, claim/done transitions, park-never-delete.
@@ -109,6 +113,7 @@ from children doing serial work:
 | agent | one child handles | own ledger |
 |---|---|---|
 | source-cloner | retired: the clone sweep is `scripts/clone-sweep.sh`, a bounded parallel ladder with one outcome line per repo | run-ledger/prepare/clone-outcomes.txt |
+| pr-pipeline | ONE window PR's ENTIRE LIFE — classification through filing and its own rollup section; spawns its own stage children | run-ledger/pipeline/<slug>/ |
 | merge-classifier | ONE window PR — fetched and classified directly, no coordinator, no grandchild | run-ledger/classifier/pr-<number>/ |
 | finding-filer | ONE finding (issue on the fork, scope-policy-aligned) | run-ledger/filer/<slug>/ |
 | revsync-applier | ONE bump candidate (clone, branch, PR) | run-ledger/revsync/<slug>/ |
@@ -193,7 +198,7 @@ coverage (present, non-empty) only. The sweep's outcomes set the run's verificat
   clone context marked `unverified`. The classifier's prompt carries its
   repo's clone-status for exactly this.
 
-## Phase 2 — Classify: one pipeline per PR
+## Phase 2 — Dispatch: one pipeline per PR, start to finish
 
 Zero merges: skip to Phase 3. Otherwise shard `rows.jsonl` into ONE item
 per PR — never a batch of several, because a batch child is a barrier
@@ -203,20 +208,36 @@ needs and nothing it does not: `<owner/repo>#<number>|<title>|<merged-at>|<watch
 (titles stripped of `|` and `;`; watch-paths from `config/repo-list.txt`,
 clone-status from the Phase 1b outcome lines).
 
-Dispatch the whole window DETACHED, every group's call in ONE turn —
-one `spawn_agents` call per group of 2–32 items, or the detached
-`spawn_agent` for a single item, each carrying `"detached": true`,
-`maxTurns: 10000`, `timeoutSecs: 3600`, and no `maxTokens`. Both tools
-return at admission and name their accepted ids, so a group costs
+Dispatch ONE `pr-pipeline` child per PR, DETACHED, every group's call in
+ONE turn — one `spawn_agents` call per group of 2–32 items, or the
+detached `spawn_agent` for a single item, each carrying `"detached":
+true`, `maxTurns: 10000`, `timeoutSecs: 3600`, and no `maxTokens`. Both
+tools return at admission and name their accepted ids, so a group costs
 nothing to queue and the pool runs the members under the concurrency
-knob while the orchestrator does other work. There is no wave barrier
-and no coordinator: poll with `poll_agents` (`{"waitSecs": 120}`, `{}`,
-or `ids`) and verify each PR as its verdict lands. A child that never
-delivered is re-spawned once with a narrowed prompt keeping its
-ORIGINAL caps; a second failure is an EXCEPTION that surfaces in the
-window comment, never silent.
+knob. A saturated pool QUEUES a detached spawn instead of refusing it,
+and a dispatch from a running pipeline launches ahead of fresh
+dispatches not yet started — so a PR's next stage never waits behind
+a pipeline that has not begun.
 
-Each child handles exactly ONE PR: fetch the complete changed-file list (`per_page=100`,
+THE PIPELINE CONTRACT: a pr-pipeline child owns its PR's ENTIRE life —
+classification, filing, and its own rollup section — and no PR ever
+waits on another. Its prompt (profile `.craft-agent/agents/pr-pipeline.md`
+is its full contract) carries the PR item, its watch-paths, its clone
+status, its verdict-file, ledger, and rollup-section paths, the
+scope-truth clone path, and the read-only-gh law. It polls ONLY its own
+ids, because the hub is shared and a bulk drain steals a sibling's
+envelope. Its stages, sequential inside the pipeline and each spawned
+detached: one `merge-classifier` child; then by class one
+`revsync-applier` or one `finding-filer` child; then, a filing LEASE
+taken from `scripts/filing-lease.sh` before any write, one
+`revsync-committer` or `finding-committer` child. A child that never
+delivered is re-spawned once with a narrowed prompt keeping its
+ORIGINAL caps; a second failure is an EXCEPTION the pipeline's ledger
+names, never silent. The orchestrator verifies each pipeline's ledger,
+verdict file, packages, outcome rows, and rollup section as its
+envelope lands — and never runs a pipeline's stage itself.
+
+Each classifier child handles exactly ONE PR: fetch the complete changed-file list (`per_page=100`,
 paginate if needed), including patches where available. Use the PR patch/diff to establish what
 changed; use the clone only for surrounding-code context. A clone alone cannot establish the PR
 change, and file paths alone cannot prove generic logic. Record the verdict as a task row, then
@@ -255,10 +276,13 @@ that PR: a `rev-sync` verdict gets its `revsync-applier` child next, a `hoist` o
 `finding-filer` child next — each dispatched DETACHED the moment it lands, while other PRs are still
 in Phase 2. No PR waits on another.
 
-## Phase 3 — File findings: the stage-2 children a PR advances into
+## Phase 3 — File findings: the stage children a pipeline advances into
 
 Rank from the batch reports: rev-sync first, then hoist, then port. At most 3 bump candidates and 3
-finding issues per run. Promote a maturing candidate only after it is corroborated in two
+finding issues per run — and the cap is now enforced per PR by the filing lease
+(`scripts/filing-lease.sh <finding|bump> <slug>`, `flock`-guarded): a pipeline takes its lease
+BEFORE dispatching a committer child, an over-cap PR defers, and a slug's own retry keeps its
+slot. The lease files under `run-ledger/filing/` are what the gate counts. Promote a maturing candidate only after it is corroborated in two
 consecutive windows; pass both windows' merge evidence and the consecutive-window streak to the
 filer. Reset the streak after a missed window; persist last-seen window, streak, and corroboration
 count in the candidate pipeline's status cell (`maturing: streak <n>, last-seen <window>,
@@ -280,10 +304,12 @@ never re-filed. `already-filed` still ends a re-file, and its new evidence is no
 corroborating merges in the candidate's pipeline row via the state snapshot — new evidence reaches
 the issue through the human, not through new write shapes.
 
-Fire the calls as each PR advances, DETACHED, so a candidate's drafting
-never waits on another's:
+The PR's own pipeline fires these calls as its verdict lands, DETACHED,
+so a candidate's drafting never waits on another's — the orchestrator
+never dispatches a stage child, because a stage child's parent is the
+pipeline that owns the PR:
 
-- Tool shape: each advancing PR dispatches its own stage-2 child with
+- Tool shape: the pipeline dispatches its own stage child with
   the detached SINGLE tool — `{"agent": "<profile>", "prompt": "<the
   whole prompt>", "maxTurns": 10000, "timeoutSecs": 1800, "detached":
   true}` — because a candidate's journey is per-PR. When several
@@ -355,10 +381,17 @@ re-resolve the cited anchor live (`gh api repos/storytold/craft-libs/issues/<n>`
 map file is never the check; anchor reads are live, per finding, read-only. A citation the anchor
 does not carry fails the phase like any other unverifiable claim.
 
-## Phase 4 — Deliver: one spawn_agent call
+## Phase 4 — Seal: compose the pipelines' rollup sections, one spawn_agent call
+
+Every pipeline writes its OWN rollup section at
+`run-ledger/rollup/<slug>.md` — one section per PR carrying its class,
+verdict reason with file evidence, its filed issue number or opened PR
+number with pin rev and behind-HEAD count, or its deferred reason, and
+its exceptions. The seal step composes those sections; a missing
+section is an exception naming its PR, never a guess.
 
 Profile `rollup-writer`, `maxTurns: 10000`, `timeoutSecs: 1800`, no `maxTokens`, `detached: true`. The prompt
-carries the state snapshot you composed: the previous Mission State body, this window's drift rows
+carries the state snapshot you composed from the sections: the previous Mission State body, this window's drift rows
 (from applier outcomes), maturing candidates with window IDs, last-seen window, consecutive-window
 streak and corroboration counts, every verified artifact by number, `already-tracked` findings with
 their anchor refs, deferred findings, the
