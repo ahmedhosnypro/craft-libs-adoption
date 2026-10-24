@@ -47,7 +47,7 @@ env:
   # next stage runs the moment a slot frees. Total covers the window's
   # pipelines plus each pipeline's stage children plus retries.
   CRAFT_AGENT_SUBAGENT_MAX_CONCURRENCY: "48"
-  CRAFT_AGENT_SUBAGENT_MAX_TOTAL: "4096"
+  CRAFT_AGENT_SUBAGENT_MAX_TOTAL: "1024"
   CRAFT_AGENT_SUBAGENT_MAX_DEPTH: "2"
   # One model call may stream past 5 minutes (thinking models); the
   # client deadline must exceed real generation time.
@@ -216,7 +216,7 @@ jobs:
 
       - name: Load the mission prompt
         id: mission
-        if: ${{ github.event.inputs.workflow != 'adopt-libs' }}
+        if: ${{ github.event.inputs.workflow != 'adopt-libs' && github.event_name != 'schedule' }}
         run: |
           set -euo pipefail
           {
@@ -235,9 +235,10 @@ jobs:
           CRAFT_AGENT_ARGS: --agent lib-adoption-analyst
           CRAFT_AGENT_MAX_TURNS: "250"
           CRAFT_AGENT_MAX_TOKENS: "5000000000"
-          # The dispatch dropdown selects the judged workflow; anything
-          # else keeps the mission. run-scan.sh switches on this.
-          CRAFT_AGENT_WORKFLOW: ${{ github.event.inputs.workflow == 'adopt-libs' && 'adopt-libs' || '' }}
+          # The dispatch dropdown selects the judged workflow; scheduled
+          # runs always take it, and anything else keeps the mission.
+          # run-scan.sh switches on this.
+          CRAFT_AGENT_WORKFLOW: ${{ (github.event.inputs.workflow == 'adopt-libs' || github.event_name == 'schedule') && 'adopt-libs' || '' }}
           # Ride out transient gateway drops mid-run.
           CRAFT_AGENT_STEP_RETRIES: "6"
           CRAFT_AGENT_WRITE_REPO: ${{ env.TARGET_REPO }}
