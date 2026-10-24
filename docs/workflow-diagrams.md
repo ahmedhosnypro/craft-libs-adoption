@@ -14,9 +14,11 @@ mission-mode sections describe the rollback path, not the destination.
 
 ## 1. The CI job — boot the gateway, run the scan
 
-The job `scan` on `ubuntu-latest` (timeout 360 min). The private model gateway
-(`ahmedhosnypro/ironrouter-backend`) is cloned, its Postgres registry restored on :5434, and the
-binary serves on :17844 before `scripts/run-scan.sh` starts the agent. The pulse step is
+The job `scan` on `ubuntu-latest` (timeout 360 min). The private model gateway comes from the
+published IronRouter release (`ahmedhosnypro/IronRouter`): the latest release (or a dispatch-pinned
+`gateway-tag`) is downloaded and checksum-verified, the registry dump is fetched from the backend
+source repo (`ahmedhosnypro/ironrouter-backend`) by itself, restored into Postgres on :5434, and
+the gateway binary serves on :17844 before `scripts/run-scan.sh` starts the agent. The pulse step is
 best-effort: it never turns a green scan red.
 
 Mission mode (the current default and the rollback path): the `Load the mission prompt` step reads
@@ -35,11 +37,12 @@ racy surfaces those parallel runs share.
 ```mermaid
 flowchart TD
     Trigger["cron 20 0,6,12,18 * * *<br/>or workflow_dispatch"] --> Checkout["Check out the repository"]
-    Checkout --> FetchGW["Fetch the model gateway<br/>ahmedhosnypro/ironrouter-backend"]
-    FetchGW --> Postgres["Start the gateway database<br/>postgres:17 on :5434"]
+    Checkout --> FetchGW["Download the model gateway release<br/>ahmedhosnypro/IronRouter, checksums verified"]
+    FetchGW --> FetchDump["Fetch the registry dump<br/>ironrouter-backend/ironrouter-registry.dump via contents API"]
+    FetchDump --> Postgres["Start the gateway database<br/>postgres:17 on :5434"]
     Postgres --> Restore["Restore the model registry<br/>pg_restore ironrouter-registry.dump"]
-    Restore --> Migrate["Apply pending gateway migrations<br/>target/release/migration up"]
-    Migrate --> StartGW["Start the model gateway<br/>target/release/app on :17844"]
+    Restore --> Migrate["Apply pending gateway migrations<br/>ironrouter-migration-x86_64-unknown-linux-gnu up"]
+    Migrate --> StartGW["Start the model gateway<br/>ironrouter-x86_64-unknown-linux-gnu on :17844"]
     StartGW --> WaitGW["Wait for the gateway<br/>/healthz then /v1/models"]
     WaitGW --> Mission["Load the mission prompt<br/>missions/adopt-libs.md"]
     Mission --> RunScan["Run the adoption scan<br/>scripts/run-scan.sh, craft-agent run --agent lib-adoption-analyst"]
