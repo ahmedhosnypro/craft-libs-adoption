@@ -22,14 +22,15 @@ source repo (`ahmedhosnypro/ironrouter-backend`) by itself, restored into Postgr
 the gateway binary serves on :17844 before `scripts/run-scan.sh` starts the agent. The pulse step is
 best-effort: it never turns a green scan red.
 
-Mission mode (the current default and the rollback path): the `Load the mission prompt` step reads
+Mission mode (the rollback path): the `Load the mission prompt` step reads
 `missions/adopt-libs.md`, and `scripts/run-scan.sh` runs `craft-agent run --agent
 lib-adoption-analyst --prompt <mission file>`. Workflow mode swaps that for `craft-agent workflow
 --workflow adopt-libs` (no `--max-tokens` — it is a per-step cap), with the renderer following the
 run's journal (step events) and the per-step session transcripts (prompts, tool calls, tool results)
 under `.craft-agent/workflows/<run_id>/` for mid-step liveness; `run-scan.sh` selects it from
 `CRAFT_AGENT_WORKFLOW`, which the `workflow` dispatch dropdown sets (`mission` or `adopt-libs`);
-scheduled runs always take the mission — see section 10. Concurrency is event-scoped:
+scheduled cron runs always take the workflow, a dispatch with the input left at `mission` keeps the
+mission — see section 10. Concurrency is event-scoped:
 scheduled runs serialize on one group (`adopt-libs-scheduled`), and every manual dispatch joins its own
 group (`adopt-libs-${{ github.run_id }}`), so a mission scan and a workflow rehearsal can run at the
 same time — the tracking-issue state update and the `already-filed`/`already-open` checks are the
