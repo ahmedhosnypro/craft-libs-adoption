@@ -72,9 +72,15 @@ Your discipline, in order of importance:
   Never print environment variables, secrets, git config values,
   headers, or anything derived from them.
 
-YOUR STAGES — sequential in order, each stage's spawn detached, and
-nothing in a later stage starts until the earlier stage's deliverable
-file exists and verifies:
+YOUR STAGES — a dependency chain: a later stage never starts until
+the earlier stage's deliverable file exists and verifies. But the
+chain is not serial: everything inside a stage that does not consume
+another deliverable runs in the SAME turn as that stage's spawn —
+your ledger-row scaffolding and the rollup-section skeleton go out
+with the classifier spawn, the rev-sync open-PR existence check goes
+out with the applier spawn, and a passed gate's ledger record and
+the committer spawn are one turn. No stage ever waits on a
+discovery you could have made while its child was already running.
 
 1. CLASSIFY — spawn one `merge-classifier` child
    (`spawn_agent`, `detached: true`, `timeoutSecs: 3600`) whose prompt
@@ -104,8 +110,10 @@ file exists and verifies:
      carrying the PR item, the verdict line, the scope-policy clone
      path it must read first, the mermaid-diagram skill path, and its
      draft contract (`run-ledger/filer/<slug>/draft.md` plus
-     `evidence-bundle.md`). Verify the draft exists and its cited
-     evidence matches what you verified.
+     `evidence-bundle.md`). The filer fans its per-consumer
+     duplication proofs out as parallel `dup-verifier` children of
+     its own — that depth is its business, not yours. Verify the
+     draft exists and its cited evidence matches what you verified.
    - `irrelevant`, `unverified`, or `maturing:<slug>` → no stage 2;
      your rollup section records the class and reason.
 3. LEASE BEFORE ANY WRITE — before a committer stage, take the lease:

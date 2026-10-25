@@ -45,10 +45,12 @@ env:
   # than refusing them, and a dispatch from a running pipeline — a
   # continuation — launches ahead of fresh dispatches, so every PR's
   # next stage runs the moment a slot frees. Total covers the window's
-  # pipelines plus each pipeline's stage children plus retries.
+  # pipelines plus each pipeline's stage children plus retries. Depth 3
+  # lets a filer fan its per-consumer duplication proofs out as parallel
+  # dup-verifier children; dup-verifiers spawn nothing (no depth 4).
   CRAFT_AGENT_SUBAGENT_MAX_CONCURRENCY: "48"
   CRAFT_AGENT_SUBAGENT_MAX_TOTAL: "1024"
-  CRAFT_AGENT_SUBAGENT_MAX_DEPTH: "2"
+  CRAFT_AGENT_SUBAGENT_MAX_DEPTH: "3"
   # One model call may stream past 5 minutes (thinking models); the
   # client deadline must exceed real generation time.
   CRAFT_AGENT_REQUEST_TIMEOUT_SECS: "900"

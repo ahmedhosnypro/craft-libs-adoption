@@ -114,8 +114,11 @@ sequenceDiagram
 
 ## 4. The subagent tree
 
-Depth 2 by design and never deeper: the orchestrator spawns per-PR pipeline children, and each
-pipeline spawns its own stage children, which spawn nothing. Every spawn carries `maxTurns: 10000`
+Depth 3, and the third level spawns nothing: the orchestrator spawns per-PR pipeline children, each
+pipeline spawns its own stage children, and the one stage that fans out further is the filer — it
+spawns one `dup-verifier` child per claimed consumer in a single detached batch, proving every
+app's duplication in parallel while it works the scope read and the licensing gate itself.
+`dup-verifier` spawns nothing. Every spawn carries `maxTurns: 10000`
 and a finite `timeoutSecs` (1800, or 3600 for a classifier child) and omits `maxTokens`: subagent
 token budgets are unlimited and reserve nothing, so a group's admission never depends on a
 slice-times-count reservation.
@@ -128,6 +131,7 @@ flowchart LR
     PL --> A["revsync-applier<br/>depth 2, detached per advancing PR"]
     PL --> J["verdict-judge (+ appellate-judge on a<br/>failed gate) — depth 2, the PR's own<br/>gate before any committer"]
     PL --> C["finding-committer /<br/>revsync-committer<br/>depth 2, only behind a passed gate"]
+    F --> DV["dup-verifier<br/>depth 3, ONE per claimed consumer,<br/>one batch turn — never spawns"]
     O -.->|"judged workflow only"| RS["rollup-writer ×1<br/>depth 1, spawn_agent from rollup-seal"]
 ```
 
@@ -381,7 +385,10 @@ child by reading its FILE, never by re-reading the envelope into its own context
 The stage-2 drafters, the gate, and the committers are different agents, and they are all stage
 children of the pipeline that owns the PR. `finding-filer` writes `run-ledger/filer/<slug>/draft.md` plus its
 evidence bundle and returns `ready <slug>` / `already-filed` / `already-tracked` / `refused` /
-`blocked`; `revsync-applier` clones, branches, and commits pin lines locally — never pushes —
+`blocked`; its own per-consumer duplication proof is parallel — it spawns one `dup-verifier`
+child per claimed consumer in one batch turn (depth 3) and works the scope read and the licensing
+gate while they run, then verifies each evidence file and composes the section from what stands.
+`revsync-applier` clones, branches, and commits pin lines locally — never pushes —
 writing `run-ledger/revsync/<slug>/branch.md` and the PR body and returning `ready` /
 `already-open #N` / `blocker`. BEFORE any committer runs, the pipeline takes its lease from
 `scripts/filing-lease.sh` — `flock`-guarded, at most 3 findings and 3 bumps per window — and an

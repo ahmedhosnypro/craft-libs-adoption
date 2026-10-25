@@ -85,8 +85,10 @@ from children doing serial work:
   rejected call (missing `promptTemplate`, no `{{item}}`, wrong key)
   means fix the call shape on the next turn — never re-send the same
   broken shape, and never fall back to doing a child's work yourself.
-- No grandchild level (depth 2): a per-PR child never spawns. The
-  orchestrator and its children are the whole tree.
+- One grandchild level in the judged workflow (depth 3): the filer
+  spawns `dup-verifier` children, one per claimed consumer, in ONE
+  batch turn; a `dup-verifier` never spawns. Mission mode keeps the
+  flatter shape — its orchestrator's per-PR children do not spawn.
 
 ## The pool envelope (plan inside it)
 
@@ -95,9 +97,10 @@ from children doing serial work:
   call, prompts ≤ 64 KiB each.
 
 - Total: at most 4096 subagents per run (CRAFT_AGENT_SUBAGENT_MAX_TOTAL) — the window's pipelines
-  plus their stage children plus retries. Depth: at most 2; this design uses exactly 2 — the
-  orchestrator and its pr-pipeline children, each spawning its own stage children — and a
-  pipeline's stage child spawns nothing. A saturated pool QUEUES a detached spawn; a dispatch from a
+  plus their stage children plus retries. Depth: at most 3 (CRAFT_AGENT_SUBAGENT_MAX_DEPTH) — the
+  orchestrator, its pr-pipeline children, each pipeline's stage children, and the one fan-out: a
+  filer's `dup-verifier` children (one batch turn, one per claimed consumer); a `dup-verifier`
+  spawns nothing. A saturated pool QUEUES a detached spawn; a dispatch from a
   running pipeline (a continuation) launches ahead of fresh dispatches.
 
 - Each pipeline is independent: it shares nothing with any other pipeline and waits on none. One
@@ -115,7 +118,8 @@ from children doing serial work:
 | source-cloner | retired: the clone sweep is `scripts/clone-sweep.sh`, a bounded parallel ladder with one outcome line per repo | run-ledger/prepare/clone-outcomes.txt |
 | pr-pipeline | ONE window PR's ENTIRE LIFE — classification through filing and its own rollup section; spawns its own stage children | run-ledger/pipeline/<slug>/ |
 | merge-classifier | ONE window PR — fetched and classified directly, no coordinator, no grandchild | run-ledger/classifier/pr-<number>/ |
-| finding-filer | ONE finding (issue on the fork, scope-policy-aligned) | run-ledger/filer/<slug>/ |
+| finding-filer | ONE finding (issue on the fork, scope-policy-aligned); in the judged workflow it spawns one `dup-verifier` per claimed consumer in one batch turn | run-ledger/filer/<slug>/ |
+| dup-verifier | ONE claimed consumer of ONE finding — proves the mechanics in that app's clone, or marks it unverified; never spawns | run-ledger/filer/<slug>/dup/<app>.md |
 | revsync-applier | ONE bump candidate (clone, branch, PR) | run-ledger/revsync/<slug>/ |
 | rollup-writer | the window comment + the Mission State body | run-ledger/rollup/ |
 
