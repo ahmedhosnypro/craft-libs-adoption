@@ -241,6 +241,9 @@ jobs:
           CRAFT_AGENT_WORKFLOW: ${{ (github.event.inputs.workflow == 'adopt-libs' || github.event_name == 'schedule') && 'adopt-libs' || '' }}
           # Ride out transient gateway drops mid-run.
           CRAFT_AGENT_STEP_RETRIES: "6"
+          # Transient failures keep retrying for this long, past the
+          # attempt bound, before a step gives up.
+          CRAFT_AGENT_RETRY_PATIENCE_SECS: "1800"
           CRAFT_AGENT_WRITE_REPO: ${{ env.TARGET_REPO }}
           CRAFT_AGENT_EGRESS_ALLOWLIST: ${{ env.CRAFT_AGENT_EGRESS_ALLOWLIST }}
           # The mission step is skipped in workflow mode, so this is empty
