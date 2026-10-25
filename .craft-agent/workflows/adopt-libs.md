@@ -127,7 +127,7 @@ steps:
     agent: verdict-judge
     kind: judge
     needs: [pr-pipeline]
-    max-turns: "250"
+    max-turns: "90"
     retry: "1"
     on-failure: stop
     deny-write: ["**"]
@@ -138,11 +138,14 @@ steps:
       max-feedback: "2"
     body: |
       Judge the per-PR pipelines' output against these rubrics ONLY.
-      Counting is ARITHMETIC — one bash pass of `find`/`wc`/`grep -c`
-      over the ledger, never file-by-file reading. Live re-verification
-      is SAMPLED — at most three GitHub reads across the whole rubric,
-      on the artifacts whose class carries the most risk. Budget
-      yourself 40 tool calls.
+      THE CALL PLAN BINDS — past 20 tool calls the seat fails. Call 1
+      is ONE composed bash script that prints every arithmetic fact at
+      once: the row count against the PR count, one `grep -c` per
+      class over the verdict files, both lease files' slugs, the
+      clone-outcome versus `sources/` diff, and a tree-wide scan for
+      out-of-scope write evidence. Calls 2-4 are the live spot-checks.
+      Any further call targets one named issue and says which.
+      Counting is ARITHMETIC — a per-file grep walk is a failed seat.
 
       1. EVERY PR HAS A ROW: one `pr-<number>.verdict` exists per PR
          in `run-ledger/prepare/rows.jsonl`, or the pipeline's ledger
@@ -181,7 +184,7 @@ steps:
     agent: appellate-judge
     kind: judge
     needs: [pipeline-gate]
-    max-turns: "200"
+    max-turns: "60"
     retry: "1"
     on-failure: stop
     deny-write: ["**"]
@@ -194,12 +197,13 @@ steps:
       Re-derive the pipeline-gate rubric yourself — every PR has a
       row, counts equal, writes are licensed, live spot-checks,
       clones match, no out-of-scope writes — read the artifacts and
-      re-verify live, GET-only, under THE JUDGE ECONOMY LAW: counting
-      is one bash pass, live re-verification samples at most two PRs,
-      and 40 tool calls is your budget. Do not count votes: a panel
-      verdict you cannot reproduce from evidence is overturned, and a
-      unanimous panel of thin verdicts is exactly what you exist to
-      catch. Requests outside the rubric are not grounds for failure.
+      re-verify live, GET-only, under THE JUDGE ECONOMY LAW: past 20
+      tool calls the seat fails, call 1 is one composed bash pass over
+      every count, and calls 2-3 are the sampled live reads. Do not
+      count votes: a panel verdict you cannot reproduce from evidence
+      is overturned, and a unanimous panel of thin verdicts is exactly
+      what you exist to catch. Requests outside the rubric are not
+      grounds for failure.
 
       Return the verdict JSON: {"verdict":"pass"|"fail","issues":["..."]}.
 
@@ -248,7 +252,7 @@ steps:
     agent: verdict-judge
     kind: judge
     needs: [rollup-seal]
-    max-turns: "250"
+    max-turns: "90"
     retry: "1"
     on-failure: stop
     deny-write: ["**"]
@@ -264,8 +268,16 @@ steps:
       StepSkipped rows with their DependencyFailed reasons are the named
       exceptions the draft records — that is the design, not a defect.
       Judge only the drafts against the artifacts they cite, under THE
-      JUDGE ECONOMY LAW (one bash count pass, ≤3 live reads, 40 tool
-      calls):
+      CALL PLAN: past 20 tool calls the seat fails. Call 1 is ONE
+      composed bash script that prints every arithmetic fact at once —
+      each draft row beside its cited artifact's local file (or a
+      CARRY-FORWARD marker), the exception rows from the pipeline
+      ledger and journal against the draft's exception list, the
+      comment's line and Signal count, and the rotation arithmetic
+      against the prior state body. Calls 2-4 are the live reads (≤3,
+      on the riskiest rows: tracking issue, one finding, one bump PR).
+      Any further call targets one named issue and says which.
+      Counting is ARITHMETIC — a per-file grep walk is a failed seat.
 
       1. EVERY ROW VERIFIED: each state-body row — drift, verdicts,
          pipeline, ports, goal movement — matches a verified artifact by
@@ -291,7 +303,7 @@ steps:
     agent: appellate-judge
     kind: judge
     needs: [rollup-gate]
-    max-turns: "200"
+    max-turns: "60"
     retry: "1"
     on-failure: stop
     deny-write: ["**"]
@@ -303,10 +315,11 @@ steps:
     body: |
       Re-derive the rollup-gate rubric yourself — every row verified by
       number, exceptions named, comment shape, rotation honored, state
-      integrity — under THE JUDGE ECONOMY LAW: counting is one bash
-      pass, live re-verification samples at most three rows, 40 tool
-      calls is your budget. Re-verify live, GET-only; do not count
-      votes; reproduce the ruling from evidence or overturn it.
+      integrity — under THE JUDGE ECONOMY LAW: past 20 tool calls the
+      seat fails, call 1 is one composed bash pass over every count,
+      and calls 2-3 are the sampled live reads (≤3 rows, GET-only).
+      Re-verify live; do not count votes; reproduce the ruling from
+      evidence or overturn it.
 
       Return the verdict JSON: {"verdict":"pass"|"fail","issues":["..."]}.
 

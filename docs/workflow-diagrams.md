@@ -256,9 +256,12 @@ pie showData title Subagents within the 4096-per-run cap
 Workflow mode lives in `.craft-agent/workflows/adopt-libs.md` (frontmatter `name: adopt-libs`, arg
 `window` default `7h`) — the same scan, but the engine sequences the steps instead of the
 orchestrator, and every GitHub write sits behind a verdict. Limits: `max-steps: "10"`,
-`max-concurrent-steps: "4"`, `max-total-turns: "10000"`, `max-total-tokens: "100000000"`,
+`max-concurrent-steps: "4"`, `max-total-turns: "10000"`, `max-total-tokens: "1000000000"`,
 `max-retries-per-step: "2"`. Every step states `max-turns`, `retry`, and `on-failure` explicitly —
-never relying on the 25/0/stop defaults.
+never relying on the 25/0/stop defaults. The judge seats are budget-bound, not advised: the gate
+bodies write a call plan (call 1 one composed bash pass, 2-4 the live reads) and the step caps bind
+it — `max-turns: "90"` on the panel gates, `"60"` on the appeals — so a seat that walks the ledger
+file-by-file fails instead of spending the window.
 
 The shape: a scripted parallel sweep (`prepare`), one per-PR dispatch step (`pr-pipeline`), one
 merged judge family (`pipeline-gate`, `pipeline-appeal`), and the seal island (`rollup-seal`,
