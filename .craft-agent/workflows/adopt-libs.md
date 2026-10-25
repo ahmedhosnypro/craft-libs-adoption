@@ -4,7 +4,7 @@ description: "6h craft-libs adoption scan: a scripted parallel sweep, then every
 args:
   window: { type: string, default: "7h" }
 limits:
-  max-steps: "10"
+  max-steps: "8"
   max-total-turns: "10000"
   max-total-tokens: "1000000000"
   max-retries-per-step: "2"
@@ -64,9 +64,11 @@ steps:
     outputs: [pipeline-rows, filed-issues, opened-prs, deferred, pipeline-exceptions]
     body: |
       Every PR in the window runs its ENTIRE life on its own pipeline —
-      classification, filing, and its own rollup section — and no PR
-      ever waits on another. You dispatch and verify; the pipelines do
-      the life.
+      classification, its draft, its OWN gate and appeal, its own
+      commit, and its rollup section — and no PR ever waits on another.
+      The PRs never meet again after the dispatch: there is no
+      post-pipeline gate step, only the seal. You dispatch and verify;
+      the pipelines do the life.
 
       - Shard `run-ledger/prepare/rows.jsonl` into ONE item per PR —
         never a batch of several, because a batch child is a barrier
@@ -100,7 +102,11 @@ steps:
         A poll returning `outstanding` is normal state.
       - VERIFY per PR, in ledger order: each pipeline's ledger row
         under `run-ledger/pipeline/` names its children and their
-        deliverables; the verdict file it named exists with the
+        deliverables; the GATE stage's verdict (and the appeal's, if
+        one ran) is recorded on that row BEFORE its committer stage —
+        a row whose committer ran without a recorded gate verdict is
+        re-spawned ONCE to record it, and otherwise fails like a
+        missing deliverable; the verdict file it named exists with the
         contract's one-line shape; every draft package, branch
         package, outcome row, and rollup section it claimed exists and
         cites only evidence verified this window or a carry-forward. A
@@ -122,90 +128,6 @@ steps:
       PRs with their numbers, the deferred list with reasons, every
       exception by name, and the count of PRs still outstanding when
       the step's turn budget forced the final message.
-
-  - id: pipeline-gate
-    agent: verdict-judge
-    kind: judge
-    needs: [pr-pipeline]
-    max-turns: "90"
-    retry: "1"
-    on-failure: stop
-    deny-write: ["**"]
-    outputs: [verdict]
-    judge:
-      panel: "3"
-      merge: majority
-      max-feedback: "2"
-    body: |
-      Judge the per-PR pipelines' output against these rubrics ONLY.
-      THE CALL PLAN BINDS — past 20 tool calls the seat fails. Call 1
-      is ONE composed bash script that prints every arithmetic fact at
-      once: the row count against the PR count, one `grep -c` per
-      class over the verdict files, both lease files' slugs, the
-      clone-outcome versus `sources/` diff, and a tree-wide scan for
-      out-of-scope write evidence. Calls 2-4 are the live spot-checks.
-      Any further call targets one named issue and says which.
-      Counting is ARITHMETIC — a per-file grep walk is a failed seat.
-
-      1. EVERY PR HAS A ROW: one `pr-<number>.verdict` exists per PR
-         in `run-ledger/prepare/rows.jsonl`, or the pipeline's ledger
-         row names it as a re-spawn-once exception or a clock
-         reclaim. Count with one `find | wc -l`; the count plus the
-         named exceptions equals the PR count.
-      2. COUNTS EQUAL: the per-class counts the step reports match one
-         `grep -c` per class over the verdict files. Arithmetic, not
-         reading.
-      3. WRITES ARE LICENSED: the filing lease files
-         (`run-ledger/filing/finding.lease`, `bump.lease`) hold at
-         most 3 slugs each; every filed issue or opened PR names a
-         slug on its lease; a slug off its lease or a fourth finding
-         fails the whole step.
-      4. LIVE SPOT-CHECKS (at most three PRs): pick two filed findings
-         and one opened bump PR. Re-verify live, read-only: the issue
-         or PR resolves by number, its body matches the verified draft
-         or branch package, and the PR it cites resolves state=closed
-         merged=true. Three PRs, not thirty.
-      5. CLONES MATCH: prepare's clone outcome lines match `sources/` —
-         each `ok` directory populated with a resolvable HEAD,
-         degraded/blocked repos present as exceptions. One bash loop
-         over the outcome lines.
-      6. NO OUT-OF-SCOPE WRITES: no verdict file, draft, branch
-         package, or outcome row contains evidence of a GitHub write
-         beyond finding issues on ahmedhosnypro/craft-libs, the
-         tracking issue, and pin-bump branches/PRs on app repos. A
-         write before the gate outside that set fails the whole step.
-
-      Return the verdict JSON: {"verdict":"pass"|"fail","issues":["..."]} —
-      your final message must be that JSON and NOTHING else: no prose,
-      no markdown, no explanation before or after it. A final message
-      that is not exactly the verdict JSON fails the whole step.
-
-  - id: pipeline-appeal
-    agent: appellate-judge
-    kind: judge
-    needs: [pipeline-gate]
-    max-turns: "60"
-    retry: "1"
-    on-failure: stop
-    deny-write: ["**"]
-    outputs: [verdict]
-    judge:
-      panel: "1"
-      merge: unanimous
-      max-feedback: "0"
-    body: |
-      Re-derive the pipeline-gate rubric yourself — every PR has a
-      row, counts equal, writes are licensed, live spot-checks,
-      clones match, no out-of-scope writes — read the artifacts and
-      re-verify live, GET-only, under THE JUDGE ECONOMY LAW: past 20
-      tool calls the seat fails, call 1 is one composed bash pass over
-      every count, and calls 2-3 are the sampled live reads. Do not
-      count votes: a panel verdict you cannot reproduce from evidence
-      is overturned, and a unanimous panel of thin verdicts is exactly
-      what you exist to catch. Requests outside the rubric are not
-      grounds for failure.
-
-      Return the verdict JSON: {"verdict":"pass"|"fail","issues":["..."]}.
 
   - id: rollup-seal
     agent: lib-adoption-analyst
@@ -262,37 +184,60 @@ steps:
       merge: majority
       max-feedback: "2"
     body: |
-      Judge the delivery drafts (run-ledger/rollup/) against this rubric
-      ONLY — and note first: other branches may still be running or
-      already settled-skipped when you judge. The run's journal
-      StepSkipped rows with their DependencyFailed reasons are the named
-      exceptions the draft records — that is the design, not a defect.
-      Judge only the drafts against the artifacts they cite, under THE
-      CALL PLAN: past 20 tool calls the seat fails. Call 1 is ONE
-      composed bash script that prints every arithmetic fact at once —
-      each draft row beside its cited artifact's local file (or a
-      CARRY-FORWARD marker), the exception rows from the pipeline
-      ledger and journal against the draft's exception list, the
-      comment's line and Signal count, and the rotation arithmetic
-      against the prior state body. Calls 2-4 are the live reads (≤3,
-      on the riskiest rows: tracking issue, one finding, one bump PR).
-      Any further call targets one named issue and says which.
-      Counting is ARITHMETIC — a per-file grep walk is a failed seat.
+      Judge the delivery drafts (run-ledger/rollup/) AND the run's
+      cross-PR arithmetic against this rubric ONLY — and note first:
+      other branches may still be running or already settled-skipped
+      when you judge. The run's journal StepSkipped rows with their
+      DependencyFailed reasons are the named exceptions the draft
+      records — that is the design, not a defect. Judge only against
+      the artifacts, under THE CALL PLAN: past 20 tool calls the seat
+      fails. Call 1 is ONE composed bash script that prints every
+      arithmetic fact at once — the PR count of rows.jsonl against the
+      pipeline ledger's rows plus its named exceptions, one `grep -c`
+      per class over the verdict files, both lease files' slugs, each
+      filed issue and opened bump PR beside its lease slug and its
+      pipeline row's gate record, the clone-outcome versus `sources/`
+      diff, a tree-wide scan for out-of-scope write evidence, each
+      draft row beside its cited artifact's local file (or a
+      CARRY-FORWARD marker), the comment's line and Signal count, and
+      the rotation arithmetic against the prior state body. Calls 2-4
+      are the live reads (≤3, on the riskiest rows: tracking issue,
+      one finding, one bump PR). Any further call targets one named
+      issue and says which. Counting is ARITHMETIC — a per-file grep
+      walk is a failed seat.
 
-      1. EVERY ROW VERIFIED: each state-body row — drift, verdicts,
+      1. EVERY PR HAS A GATED ROW: one pipeline ledger row per PR in
+         `run-ledger/prepare/rows.jsonl`, or the row names its
+         exception (re-spawn-once, clock reclaim, deferred). Every
+         GitHub artifact the run wrote — finding issue or bump PR —
+         sits behind that row's own GATE stage: a passed per-PR gate
+         (and, after a failed one, a binding appeal) recorded before
+         the committer stage. A write without a passed gate row fails
+         the whole step.
+      2. COUNTS AND LEASES HOLD: the per-class counts match the
+         verdict files; both lease files hold at most 3 slugs; every
+         filed issue or opened PR names a slug on its lease; a slug
+         off its lease or a fourth finding fails the whole step.
+      3. CLONES AND WRITES MATCH THE LAWS: prepare's clone outcome
+         lines match `sources/` (each `ok` directory populated with a
+         resolvable HEAD, degraded/blocked present as exceptions), and
+         no artifact anywhere in the run shows a GitHub write beyond
+         finding issues on ahmedhosnypro/craft-libs, the tracking
+         issue, and pin-bump branches/PRs on app repos.
+      4. EVERY ROW VERIFIED: each state-body row — drift, verdicts,
          pipeline, ports, goal movement — matches a verified artifact by
          number (`gh api` reads on ahmedhosnypro/craft-libs and the app
          repos); carry-forwards match the prior body; unverifiable is
          `n/a (gap)`, never a guess.
-      2. EXCEPTIONS NAMED: every exception the pipeline ledger and the
+      5. EXCEPTIONS NAMED: every exception the pipeline ledger and the
          journal record for this run appears as an exception — in the
          body or the comment — never silently absent.
-      3. COMMENT SHAPE: 3–8 lines plus one Signal line per active repo;
+      6. COMMENT SHAPE: 3–8 lines plus one Signal line per active repo;
          an empty window is exactly three lines.
-      4. ROTATION HONORED: target.md matches the live tracking issue's
+      7. ROTATION HONORED: target.md matches the live tracking issue's
          comment count (>30 → rotate plan with forward-link and close
          after verify); the oldest-open rule holds.
-      5. STATE IS THE GOAL'S FACE: already-tracked rows sit beside the
+      8. STATE IS THE GOAL'S FACE: already-tracked rows sit beside the
          verdicts, never inside them; parked/resolved rows reference
          their verdict rows.
 
@@ -325,13 +270,13 @@ steps:
 
   - id: rollup-commit
     agent: rollup-committer
-    needs: [rollup-appeal, pipeline-appeal]
+    needs: [rollup-appeal]
     max-turns: "120"
     retry: "1"
     on-failure: skip
     outputs: [delivery-rows]
     body: |
-      The appeals above passed. Execute the delivery plan the gate
+      The appeal above passed. Execute the delivery plan the gate
       passed:
 
       - Follow run-ledger/rollup/target.md exactly: create the tracking
@@ -341,9 +286,10 @@ steps:
       - Write the state body and post the comment byte-identically from
         run-ledger/rollup/state-body.md and comment.md; verify both by
         ID afterward; write run-ledger/outcomes/rollup.md.
-      - Append the pipeline-gate and pipeline-appeal verdicts from this
-        run's journal to the state body's exception section: a failed
-        gate is a named exception, never a hidden one.
+      - Append this run's per-PR gate exceptions from the pipeline
+        ledger (upheld deferrals, clock reclaims, unverified endings)
+        to the state body's exception section: a PR whose write was
+        never gated in is a named exception, never a hidden one.
 
       Final message: the tracking-issue permalink, the comment
       permalink, every rotation/close action, and anything blocked.

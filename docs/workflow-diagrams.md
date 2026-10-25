@@ -8,8 +8,8 @@ artifact. One diagram per concept; nothing here invents entities.
 Two modes are drawn here. **Mission mode** (sections 1–9) is today's CI default and the rollback
 path: `lib-adoption-analyst` drives the phases itself and the specialists write to GitHub directly.
 **Workflow mode** (sections 10–12) is the judged DAG in `.craft-agent/workflows/adopt-libs.md` —
-8 steps gating every GitHub write behind a panel and an appellate verdict, and running each PR's
-whole life on its own detached pipeline. Mission mode is the
+6 steps where each PR's whole life, including its own gate and appeal, runs on its own detached
+pipeline, and only the seal's write gathers the run again. Mission mode is the
 current reality; workflow mode is what the same run becomes, so where the two conflict the
 mission-mode sections describe the rollback path, not the destination.
 
@@ -86,8 +86,8 @@ own detached child, and each PR advances to its stage-2 child the moment its ver
 no wave barrier between PRs, and no PR waiting on another.
 
 **Rollback-path note:** the arrows below are mission mode. Under the judged workflow the same
-children are stage children of the PR's own pipeline, each write gated by a filing lease and then by
-the pipeline-gate; see section 12.
+children are stage children of the PR's own pipeline, each write gated by a filing lease and then
+by that pipeline's own single-PR gate; see section 12.
 
 ```mermaid
 sequenceDiagram
@@ -126,7 +126,8 @@ flowchart LR
     PL --> M["merge-classifier<br/>depth 2, ONE per PR — never spawns"]
     PL --> F["finding-filer<br/>depth 2, detached per advancing PR"]
     PL --> A["revsync-applier<br/>depth 2, detached per advancing PR"]
-    PL --> C["finding-committer /<br/>revsync-committer<br/>depth 2, after a filing lease"]
+    PL --> J["verdict-judge (+ appellate-judge on a<br/>failed gate) — depth 2, the PR's own<br/>gate before any committer"]
+    PL --> C["finding-committer /<br/>revsync-committer<br/>depth 2, only behind a passed gate"]
     O -.->|"judged workflow only"| RS["rollup-writer ×1<br/>depth 1, spawn_agent from rollup-seal"]
 ```
 
@@ -251,32 +252,36 @@ pie showData title Subagents within the 4096-per-run cap
 
 ---
 
-## 10. The judged workflow — the 8-step DAG, one pipeline per PR
+## 10. The judged workflow — the 6-step DAG, gates live inside each pipeline
 
 Workflow mode lives in `.craft-agent/workflows/adopt-libs.md` (frontmatter `name: adopt-libs`, arg
 `window` default `7h`) — the same scan, but the engine sequences the steps instead of the
-orchestrator, and every GitHub write sits behind a verdict. Limits: `max-steps: "10"`,
-`max-concurrent-steps: "4"`, `max-total-turns: "10000"`, `max-total-tokens: "1000000000"`,
+orchestrator, and every GitHub write sits behind a verdict. Limits: `max-steps: "8"` (headroom over
+the 6 steps), `max-concurrent-steps: "4"`, `max-total-turns: "10000"`, `max-total-tokens: "1000000000"`,
 `max-retries-per-step: "2"`. Every step states `max-turns`, `retry`, and `on-failure` explicitly —
 never relying on the 25/0/stop defaults. The judge seats are budget-bound, not advised: the gate
 bodies write a call plan (call 1 one composed bash pass, 2-4 the live reads) and the step caps bind
 it — `max-turns: "90"` on the panel gates, `"60"` on the appeals — so a seat that walks the ledger
 file-by-file fails instead of spending the window.
 
-The shape: a scripted parallel sweep (`prepare`), one per-PR dispatch step (`pr-pipeline`), one
-merged judge family (`pipeline-gate`, `pipeline-appeal`), and the seal island (`rollup-seal`,
-`rollup-gate`, `rollup-appeal`, `rollup-commit`) that starts the moment `pr-pipeline` settles and
-waits for both appeals before its single write. Only success releases dependants, so what happens
-after a failure depends on that step's `on-failure`.
+The shape: a scripted parallel sweep (`prepare`), one per-PR dispatch step (`pr-pipeline`) whose
+children each run that PR's ENTIRE life — classification, its draft, its OWN gate and appeal, its
+own commit, its rollup section — and the seal island (`rollup-seal`, `rollup-gate`,
+`rollup-appeal`, `rollup-commit`) that composes what settled and makes the run's one tracking-issue
+write. The PRs never meet again after the dispatch: there is no post-pipeline gate step, because
+the gate a PR's write sits behind is a stage inside the PR's own pipeline, so a write is audited
+by the same pipeline seconds after its package is verified, not by a global seat hours later.
 
-What changed from the 10-step shape and why: the write lanes collapsed INTO the pipelines. A PR's
-whole life — classification, filing, and its own rollup section — now runs inside one detached
-`pr-pipeline` child, so `file-commit`/`bump-commit`/`rollup-draft` are no longer steps: the
-commsitters and the rollup-writer are stage children the pipeline itself spawns. The step's job
-shrank to dispatching the window's pipelines, polling only its own ids, verifying their
-deliverables, and naming exceptions. The gates stayed: one judge family audits the whole per-PR
-output — every PR has a row, the filing leases honored the ≤3/≤3 caps, the filed issues and opened
-PRs match their verified drafts — and the seal is one single-writer commit.
+What changed from the earlier 8-step shape and why: the global `pipeline-gate`/`pipeline-appeal`
+steps are gone — they audited every PR's output in one merged seat after the whole pipeline step
+settled, which re-gathered the PRs the architecture had just separated and serialized the window's
+most expensive work. Their per-PR checks moved into stage 4 of each pipeline (one `verdict-judge`
+child per PR, one repair, one `appellate-judge` appeal — no GitHub write is ever made behind a
+failed gate), and their cross-PR arithmetic (every PR has a gated row, counts and leases, clone
+and write laws) moved into the `rollup-gate` rubric, where the seal already reads every pipeline's
+ledger row. The step's job shrank to dispatching the window's pipelines, polling only its own ids,
+verifying each pipeline's ledger row records its gate verdict before its committer, and naming
+exceptions.
 
 **Failure policy — schema-enforced, not a preference.** A step the run survives a failure of
 (`skip` or `warn`) must be a leaf: the workflow schema forbids `skip`/`warn` on a step that has
@@ -284,36 +289,36 @@ dependants, or the pipeline stalls. So every step anything depends on is `stop`,
 `rollup-commit` — nothing needs it — is `skip`. A gate that settles failed therefore halts
 admissions: the run ends `Failed` (exit 1 on a step error, 2 on max-turns, 3 on budget), its
 dependants settle as skipped with a named `DependencyFailed` reason (journaled, never silent), and
-the next run heals from the prior state body.
+the next run heals from the prior state body. Inside a pipeline the same rule holds per PR: a
+failed gate defers that PR with its issues named — it never silently loses the PR.
 
 `rollup-seal` composes the state snapshot from the pipelines' per-PR sections under
 `run-ledger/rollup/<slug>.md`, the outcome rows, and the journal — a missing section is a named
 exception, never a guess — with a bounded wait (≤45 min) for the file and bump lanes. `pr-pipeline`
 carries the heaviest budget (1200 turns): one detached child per PR, then polls as each pipeline's
-envelope lands and verifies its ledger, verdict file, packages, and outcome rows.
+envelope lands and verifies its ledger, gate record, verdict file, packages, and outcome rows.
 
 ```mermaid
 flowchart TD
-    P["1 prepare — lib-adoption-analyst<br/>scripts/launch-sweeps.sh: collection, clone sweep,<br/>verdict-digest read — all concurrent"] --> Q["2 pr-pipeline — lib-adoption-analyst<br/>one DETACHED pr-pipeline child per PR;<br/>each child owns that PR's whole life"]
-    Q --> PG{"3 pipeline-gate<br/>verdict-judge, panel 3, majority"}
-    PG -->|pass| PA{"4 pipeline-appeal<br/>appellate-judge, panel 1, unanimous"}
+    P["1 prepare — lib-adoption-analyst<br/>scripts/launch-sweeps.sh: collection, clone sweep,<br/>verdict-digest read — all concurrent"] --> Q["2 pr-pipeline — lib-adoption-analyst<br/>one DETACHED pr-pipeline child per PR;<br/>each child owns that PR's whole life,<br/>gate and appeal included"]
 
-    subgraph seal["seal island — steps 5-8"]
+    subgraph seal["seal island — steps 3-6"]
         direction TB
-        RS["5 rollup-seal — lib-adoption-analyst<br/>compose per-PR sections + outcomes"] --> RG{"6 rollup-gate<br/>verdict-judge, panel 3, majority"}
-        RG -->|pass| RA{"7 rollup-appeal<br/>appellate-judge, panel 1, unanimous"}
-        RA -->|uphold| RC["8 rollup-commit — rollup-committer<br/>needs BOTH appeals"]
+        RS["3 rollup-seal — lib-adoption-analyst<br/>compose per-PR sections + outcomes"] --> RG{"4 rollup-gate<br/>verdict-judge, panel 3, majority<br/>absorbs the cross-PR arithmetic"}
+        RG -->|pass| RA{"5 rollup-appeal<br/>appellate-judge, panel 1, unanimous"}
+        RA -->|uphold| RC["6 rollup-commit — rollup-committer<br/>the run's one tracking-issue write"]
         RG -.->|"fail: gate stops the run (skips below it, named)"| RC
     end
 
     Q -->|"needs: pr-pipeline only"| RS
-    PA -->|"uphold: the seal may post"| RC
-    PG -.->|"fail: run stops; the seal settles skipped (DependencyFailed)"| RC
+    RA -->|"uphold: the seal may post"| RC
+    Q -.->|"each pipeline defers its own PR on a<br/>failed second gate — named, never silent"| RC
 ```
 
-The dotted edges show what a failed gate does: admissions halt, and everything below it settles as
-skipped with a named `DependencyFailed` reason — the seal never posts, and the run's conclusion is
-`Failed` with the journal carrying every reason.
+The dotted edges show what a failed gate does: a per-PR gate failure defers only that PR (its
+pipeline names it and moves on); a failed `rollup-gate` halts admissions, everything below it
+settles as skipped with a named `DependencyFailed` reason — the seal never posts, and the run's
+conclusion is `Failed` with the journal carrying every reason.
 
 ## 11. One pipeline — per PR, a whole life, never blocked by a sibling
 
@@ -350,13 +355,17 @@ sequenceDiagram
     Pool-->>O: poll collects #1200 → verified, done
     Pool->>A: fetch files, Cargo.lock pin bump
     A-->>Pool: verdict: rev-sync
+    A->>Pool: spawn_agent revsync-applier (detached) → package verified
     A->>Pool: scripts/filing-lease.sh bump <slug> — leased
-    A->>Pool: spawn_agent revsync-applier (detached) → revsync-committer (detached)
-    Note over A,B: #41 is filed and finished while #900 is<br/>still in its FIRST stage — by design
+    A->>Pool: spawn_agent verdict-judge for #41 (detached) — gate passes
+    A->>Pool: spawn_agent revsync-committer (detached)
+    Note over A,B: #41 is gated, filed, and finished while #900<br/>is still in its FIRST stage — by design
     Pool->>B: fetch files, generic logic in src/
     B-->>Pool: verdict: hoist
+    B->>Pool: spawn_agent finding-filer (detached) → draft verified
     B->>Pool: scripts/filing-lease.sh finding <slug> — leased
-    B->>Pool: spawn_agent finding-filer (detached) → finding-committer (detached)
+    B->>Pool: spawn_agent verdict-judge for #900 (detached) — gate passes
+    B->>Pool: spawn_agent finding-committer (detached)
     B->>B: rollup section + ledger row — journey ends
 ```
 
@@ -369,16 +378,20 @@ child by reading its FILE, never by re-reading the envelope into its own context
 
 ## 12. The pipeline's own writes — leased, then committed
 
-The stage-2 drafters and the committers are different agents, and they are all stage children of
-the pipeline that owns the PR. `finding-filer` writes `run-ledger/filer/<slug>/draft.md` plus its
+The stage-2 drafters, the gate, and the committers are different agents, and they are all stage
+children of the pipeline that owns the PR. `finding-filer` writes `run-ledger/filer/<slug>/draft.md` plus its
 evidence bundle and returns `ready <slug>` / `already-filed` / `already-tracked` / `refused` /
 `blocked`; `revsync-applier` clones, branches, and commits pin lines locally — never pushes —
 writing `run-ledger/revsync/<slug>/branch.md` and the PR body and returning `ready` /
 `already-open #N` / `blocker`. BEFORE any committer runs, the pipeline takes its lease from
 `scripts/filing-lease.sh` — `flock`-guarded, at most 3 findings and 3 bumps per window — and an
-over-cap PR defers with its reason recorded. Only then do the committers perform the writes, each
-idempotently so a retry can never duplicate an issue; the judges re-verify the result live
-afterward.
+over-cap PR defers with its reason recorded. With the lease held, the pipeline's OWN gate runs: one
+`verdict-judge` child audits this PR's package against the single-PR rubric (evidence resolves,
+verdict matches package, scope holds, lease honored, package writable-as-is); a failed gate is
+repaired once and re-judged, and a second failure goes to one `appellate-judge` child whose verdict
+binds — overturn commits, uphold defers the PR with its issues named. Only a passed gate releases
+the committers, each idempotently so a retry can never duplicate an issue; the gate verdict (and
+the appeal's, if one ran) is recorded on the pipeline's ledger row before the committer stage.
 
 ```mermaid
 flowchart LR
@@ -386,8 +399,10 @@ flowchart LR
         direction TB
         CL["merge-classifier<br/>pr-<number>.verdict"] --> |"rev-sync / hoist / port"| DR{"stage-2 drafter<br/>detached, continuation-priority"}
         DR --> |"over-cap: defer"| DEF["deferred —named in the rollup section"]
-        LEASE["scripts/filing-lease.sh<br/>flock, ≤3 findings, ≤3 bumps"] --> |"leased"| COMM["finding-committer /<br/>revsync-committer"]
+        LEASE["scripts/filing-lease.sh<br/>flock, ≤3 findings, ≤3 bumps"] --> |"leased"| GATE{"stage-4 gate:<br/>one verdict-judge child per PR;<br/>repair once, then appellate-judge"}
         DR --> |"package verified"| LEASE
+        GATE -->|"pass + gate verdict on the ledger row"| COMM["finding-committer /<br/>revsync-committer"]
+        GATE -->|"second fail upheld: defer"| DEF
     end
     COMM --> W["the lane's only GitHub writes:<br/>finding issue on craft-libs,<br/>pin-bump PR on the app repo"]
     COMM --> OUT["run-ledger/outcomes/<br/>file-<slug>.md, bump-<slug>.md"]

@@ -4,12 +4,13 @@ description: >-
   Owner of one merged PR's entire life in the craft-libs adoption
   scan. Use when a PR from the window's rows.jsonl must run its own
   pipeline from classification through filing: spawning its classifier,
-  filer, applier, and committer stage children as detached parallel
-  work, polling only its own ids, verifying every child's deliverable
-  file, taking a filing lease before any GitHub write, and writing
-  this PR's own ledger row and rollup section. One PR, one pipeline,
-  start to finish; no PR ever waits on another. Runs headless inside
-  CI.
+  filer, applier, judge, and committer stage children as detached
+  parallel work, gating its own write behind a single-PR verdict (and
+  an appellate seat when the gate fails once), polling only its own
+  ids, verifying every child's deliverable file, taking a filing lease
+  before any GitHub write, and writing this PR's own ledger row and
+  rollup section. One PR, one pipeline, start to finish; no PR ever
+  waits on another. Runs headless inside CI.
 promptMode: full
 tools: bash, read_file, write_file, edit_file, glob, grep, gh, spawn_agent, spawn_agents, poll_agents
 maxTurns: 10000
@@ -114,7 +115,34 @@ file exists and verifies:
    GitHub artifact, and let your rollup section say `deferred`. A
    slug's own retry keeps its slot — the cap counts slugs, never
    attempts.
-4. COMMIT — with a lease held, spawn the committer for your class:
+4. GATE YOUR OWN WRITE — the write is never your call. Spawn ONE
+   `verdict-judge` child (`spawn_agent`, `detached: true`,
+   `timeoutSecs: 1800`) whose prompt carries: the PR item, the verdict
+   line, the package paths (draft or branch package plus its evidence
+   bundle), the scope-truth clone path, the lease line that names your
+   slug, and the SINGLE-PR RUBRIC:
+   1. EVIDENCE RESOLVES — every path, line, PR, and rev the package
+      cites exists (in the clone, or live GET-only) and says what the
+      package says it says.
+   2. VERDICT MATCHES PACKAGE — the class, the files evidence, and
+      the pin targets agree; nothing invented, nothing stale.
+   3. SCOPE HOLDS — the framing matches the scope-truth policy read
+      this run; duplication claims cite real paths.
+   4. LEASE HONORED — the package's slug is the lease's slug, and the
+      write lane named is the one the class allows.
+   5. PACKAGE IS WRITABLE-AS-IS — body complete, no secrets, no
+      process detail, no placeholder data.
+   Poll by its id. On `pass` go to stage 5. On `fail` — repair ONCE:
+   re-spawn the producing child (filer or applier) with the judge's
+   issues in a narrowed prompt keeping the ORIGINAL caps, verify the
+   repaired package, and spawn a fresh verdict-judge on it. If the
+   second gate fails, spawn ONE `appellate-judge` child (same shape,
+   carrying both failed verdicts with their issues): its verdict
+   binds — an overturn commits, an uphold defers this PR with the
+   issues named in your rollup section, and no GitHub artifact is
+   ever written behind a failed gate.
+5. COMMIT — with the gate passed and the lease held, spawn the
+   committer for your class:
    `finding-committer` (filed the draft byte-identically, verified by
    number, wrote `run-ledger/outcomes/file-<slug>.md`) or
    `revsync-committer` (checked for an open PR on the branch first,
@@ -124,12 +152,14 @@ file exists and verifies:
    outcome row exists and names the real issue or PR number — check
    it live, read-only, yourself. Never file a slug named refused or
    blocked, a deferred slug, or a package that is missing.
-5. WRITE YOUR OWN RECORDS — the PR's life ends in your files, which
+6. WRITE YOUR OWN RECORDS — the PR's life ends in your files, which
    the run's seal step composes; nothing about your PR lives only in
    your context:
    - your ledger row under `run-ledger/pipeline/` — one task per
-     child deliverable, failures and retries recorded, exceptions
-     named, park-never-delete (the vendored pooled-missions skill is
+     child deliverable, failures and retries recorded, the GATE
+     stage's verdict (and the appeal's, if one ran) recorded on the
+     row before the committer's, exceptions named,
+     park-never-delete (the vendored pooled-missions skill is
      your ledger discipline);
    - your rollup section at the path in your prompt
      (`run-ledger/rollup/<slug>.md`) — one section carrying: the PR,
