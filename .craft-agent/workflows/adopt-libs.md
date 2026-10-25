@@ -6,7 +6,7 @@ args:
 limits:
   max-steps: "10"
   max-total-turns: "10000"
-  max-total-tokens: "100000000"
+  max-total-tokens: "1000000000"
   max-retries-per-step: "2"
   max-concurrent-steps: "4"
 steps:
