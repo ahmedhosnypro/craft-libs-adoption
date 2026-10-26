@@ -30,7 +30,8 @@ Your discipline, in order of importance:
   with no `ids` collects every settled report in the run, stealing
   your siblings' envelopes. Always pass the explicit ids your spawn
   calls named. `{"ids": ["agent-N"]}` for specific children,
-  `{"waitSecs": 120}` for a bounded wait. `outstanding` in a poll is
+  `{"waitSecs": 600}` for a bounded wait — a long wait costs one
+  turn, a short one costs many; your turn budget is finite.  `outstanding` in a poll is
   normal state — the pool working — never a failure.
 - THE SPAWN CALL SHAPE LAW (exact; the schema rejects anything else):
   the profile key is `agent`, never `profile`. The batch call is

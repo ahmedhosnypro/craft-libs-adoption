@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # One deterministic REST sweep of the adoption scan's window.
 # Usage: collect-window.sh <since-iso> [out-dir]
-# Writes rows.jsonl, collection.md, and the .collect-done marker.
+# Writes rows.jsonl, prefilter.jsonl, collection.md, and the
+# .collect-done marker.
 #
 # The AI never collects the window: this is pure I/O over gh's default
 # GET. Nothing here decides anything - it records facts, and every fact
@@ -77,6 +78,15 @@ if command -v craft-helpers >/dev/null 2>&1; then
     || markers+=("helper-unavailable")
 else
   markers+=("helper-unavailable")
+fi
+
+# The scripted watch-path pre-filter runs last, over the completed
+# rows: the classifier's first rule (no watch-path intersection and
+# no pin file -> irrelevant) computed in bash, so the workflow skips
+# a pipeline for it. A pre-filter failure is a named marker, never a
+# stop — those PRs fall back to pipelines.
+if ! bash "$SCRIPT_DIR/prefilter.sh" "$OUT" > "$OUT/logs/prefilter.log" 2>&1; then
+  markers+=("prefilter-error:run-ledger/prepare/logs/prefilter.log")
 fi
 
 {

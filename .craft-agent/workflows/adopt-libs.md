@@ -37,10 +37,16 @@ steps:
       Then verify, with bash and one bash pass — not per-repo reads:
 
       - `rows.jsonl`: row count, per-repo counts, and every marker
-        (`collection-truncated`, `collection-error`, `helper-unavailable`)
-        recorded as an EXCEPTION. A truncated or unread repo never
-        silently loses its PRs: the exception names the repo and says
-        the uncollected count is unknown.
+        (`collection-truncated`, `collection-error`, `helper-unavailable`,
+        `prefilter-error`) recorded as an EXCEPTION. A truncated or unread
+        repo never silently loses its PRs: the exception names the repo and
+        says the uncollected count is unknown.
+      - `prefilter.jsonl`: one row per PR in `rows.jsonl`; every
+        `error` row and every page-capped row is an EXCEPTION —
+        those PRs always get pipelines; the pipelined/skipped split
+        goes in the final message. A missing pre-filter is the
+        `prefilter-error` exception, and every PR then gets a
+        pipeline.
       - `clone-outcomes.txt`: every `ok` line's `sources/<slug>/` is
         populated, and a git-method `ok` line's HEAD resolves to its
         recorded rev. A mismatched HEAD is degraded, never ok.
@@ -70,15 +76,27 @@ steps:
       post-pipeline gate step, only the seal. You dispatch and verify;
       the pipelines do the life.
 
-      - Shard `run-ledger/prepare/rows.jsonl` into ONE item per PR —
-        never a batch of several, because a batch child is a barrier
-        its siblings wait on. Item shape:
+      - SHARD BY THE PRE-FILTER. `run-ledger/prepare/prefilter.jsonl`
+        carries one row per PR, `intersect: true` when the changed
+        files hit the repo's watch-paths or a pin file, or when the
+        file list failed or page-capped. ONE pipeline item per such
+        PR — never a batch of several, because a batch child is a
+        barrier its siblings wait on. Item shape:
         `<owner/repo>#<number>|<title>|<merged-at>|<watch-paths csv>|<clone-status>`,
         titles stripped of `|` and `;`, watch-paths from
         `config/repo-list.txt`, clone-status from prepare's outcome
         lines (`ok` / `ok-degraded` / `blocked`). Order items
         newest-first, so any dispatch that cannot start at once runs
         newest-first too.
+      - RECORD THE SCRIPTED-IRRELEVANT PRS — prefilter rows with
+        `intersect: false`, no error, no truncation — in ONE bash
+        pass, in the same turn as the dispatch: a ledger row under
+        `run-ledger/pipeline/` and a rollup section at
+        `run-ledger/rollup/<slug>.md`, class `irrelevant`, reason
+        `<files_n> changed files, none intersecting the watch-paths,
+        no pin file (prefilter row cited)` — and nothing else. No
+        verdict file, no children, no lease, no gate, no GitHub
+        write: a scripted row makes no artifact, so it needs none.
       - DISPATCH — one `pr-pipeline` child per PR, DETACHED, every
         group's call in ONE turn: `{"agent": "pr-pipeline",
         "promptTemplate": "<the per-PR contract carrying {{item}}, its
@@ -98,7 +116,7 @@ steps:
         with every pipeline's stage children, so a bulk drain collects
         your pipelines' siblings' envelopes and steals them. Record
         every accepted id in your ledger; poll `{"ids": [...]}` for
-        named pipelines and `{"waitSecs": 120}` for a bounded wait.
+        named pipelines and `{"waitSecs": 600}` for a bounded wait.
         A poll returning `outstanding` is normal state.
       - VERIFY per PR, in ledger order: each pipeline's ledger row
         under `run-ledger/pipeline/` names its children and their
@@ -124,10 +142,12 @@ steps:
         named in the rollup sections you verify — never invented, and
         never un-filed after the fact.
 
-      Final message: per-PR rows by class, the filed issues and opened
-      PRs with their numbers, the deferred list with reasons, every
-      exception by name, and the count of PRs still outstanding when
-      the step's turn budget forced the final message.
+      Final message: per-PR rows by class (pipelines and
+      scripted-irrelevant rows alike), the pipelined/skipped split
+      from the pre-filter, the filed issues and opened PRs with their
+      numbers, the deferred list with reasons, every exception by
+      name, and the count of PRs still outstanding when the step's
+      turn budget forced the final message.
 
   - id: rollup-seal
     agent: lib-adoption-analyst
@@ -208,7 +228,11 @@ steps:
 
       1. EVERY PR HAS A GATED ROW: one pipeline ledger row per PR in
          `run-ledger/prepare/rows.jsonl`, or the row names its
-         exception (re-spawn-once, clock reclaim, deferred). Every
+         exception (re-spawn-once, clock reclaim, deferred). A
+         scripted pre-filter row (files-API count, no watch-path
+         intersection, no pin file) is a valid row for an irrelevant
+         PR that wrote nothing — it needs no gate because it makes no
+         GitHub artifact. Every
          GitHub artifact the run wrote — finding issue or bump PR —
          sits behind that row's own GATE stage: a passed per-PR gate
          (and, after a failed one, a binding appeal) recorded before

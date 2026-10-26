@@ -67,12 +67,13 @@ the specialists' writes sit behind the pipeline's lease and the gates.
 
 ```mermaid
 flowchart TD
-    Init["Run start: window, Mission State,<br/>maintainer-verdict digest, mission.db"] --> Sweep["scripts/launch-sweeps.sh — ONE call<br/>collection + clone sweep + digest read, concurrent"]
-    Sweep --> Zero{"Any merges in window?"}
-    Zero -->|Yes| P2["Phase 2 — Classify<br/>one DETACHED child per PR, every group in one turn"]
+    Init["Run start: window, Mission State,<br/>maintainer-verdict digest, mission.db"] --> Sweep["scripts/launch-sweeps.sh — ONE call<br/>collection (+ scripted watch-path pre-filter)<br/>+ clone sweep + digest read, concurrent"]
+    Sweep --> Pre{"Prefilter: any PR with a<br/>watch-path hit or pin file?"}
+    Pre -->|scripted irrelevant rows| Record["ONE bash pass: ledger rows +<br/>rollup sections, no pipelines"]
+    Pre -->|Yes: intersecting PRs| P2["Phase 2 — Classify<br/>one DETACHED pipeline per intersecting PR,<br/>every group in one turn"]
     P2 --> Poll["poll_agents as each verdict lands —<br/>that PR advances to its stage-2 child immediately"]
     Poll --> P3["Phase 3 — File findings + pin bumps<br/>≤3 findings, ≤3 bumps, per PR as it advances"]
-    Zero -->|No| P3
+    Pre -->|No intersecting PRs| P3
     P3 --> Stop{"Turn 180 stop rule"}
     Stop --> P4["Phase 4 — Deliver<br/>rollup-writer spawn_agent"]
     P4 --> Body["Mission State body<br/>on tracking issue Adoption scan rollups"]
@@ -304,7 +305,7 @@ envelope lands and verifies its ledger, gate record, verdict file, packages, and
 
 ```mermaid
 flowchart TD
-    P["1 prepare — lib-adoption-analyst<br/>scripts/launch-sweeps.sh: collection, clone sweep,<br/>verdict-digest read — all concurrent"] --> Q["2 pr-pipeline — lib-adoption-analyst<br/>one DETACHED pr-pipeline child per PR;<br/>each child owns that PR's whole life,<br/>gate and appeal included"]
+    P["1 prepare — lib-adoption-analyst<br/>scripts/launch-sweeps.sh: collection, clone sweep,<br/>verdict-digest read — all concurrent; the scripted<br/>watch-path pre-filter runs over the rows"] --> Q["2 pr-pipeline — lib-adoption-analyst<br/>one DETACHED pr-pipeline child per intersecting PR<br/>(prefilter.jsonl); scripted-irrelevant PRs get<br/>ledger rows + rollup sections in one bash pass,<br/>no pipeline; each child owns that PR's whole life,<br/>gate and appeal included"]
 
     subgraph seal["seal island — steps 3-6"]
         direction TB
@@ -326,12 +327,15 @@ conclusion is `Failed` with the journal carrying every reason.
 
 ## 11. One pipeline — per PR, a whole life, never blocked by a sibling
 
-`pr-pipeline` is the step the per-PR architecture lives in. It shards `rows.jsonl` into ONE item per
-PR and dispatches the whole window as detached `pr-pipeline` children: every group's `spawn_agents`
-call carries `"detached": true`, so it returns at admission and the pool runs the members under the
-concurrency knob. Each child then runs its PR's ENTIRE life inside itself, spawning its own stage
-children detached and polling only its own ids. A PR may finish its whole life — classification,
-filed issue, rollup section — while another PR is still in its first stage.
+`pr-pipeline` is the step the per-PR architecture lives in. It shards by the scripted pre-filter —
+`prefilter.jsonl` carries one row per PR, and only rows with a watch-path hit, a pin file, a
+file-list error, or a page cap become ONE pipeline item each; rows with no intersection and no pin
+are scripted `irrelevant`, recorded as ledger rows and rollup sections in one bash pass with no
+children. It dispatches the intersecting PRs as detached `pr-pipeline` children: every group's
+`spawn_agents` call carries `"detached": true`, so it returns at admission and the pool runs the
+members under the concurrency knob. Each child then runs its PR's ENTIRE life inside itself,
+spawning its own stage children detached and polling only its own ids. A PR may finish its whole
+life — classification, filed issue, rollup section — while another PR is still in its first stage.
 
 The pool makes that true at window scale. A saturated pool QUEUES a detached spawn instead of
 refusing it (the caller already returned at admission), and a dispatch from a running child — a

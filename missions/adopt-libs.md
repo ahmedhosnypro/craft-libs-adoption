@@ -166,6 +166,16 @@ the window, the per-repo table, and the helper/REST/final comparison —
 workspace audit only, where a mismatch is an EXCEPTION that surfaces in
 the window comment.
 
+Last, over the completed rows, the script runs the scripted
+watch-path PRE-FILTER (`scripts/prefilter.sh` → `prefilter.jsonl`):
+for every PR it fetches the changed-file list (GET only, 3-page cap)
+and intersects it with the repo's watch-paths — the classifier's
+first rule, computed in bash. A PR with no intersection and no pin
+file is a scripted `irrelevant` that Phase 2 records without a
+pipeline; a file-list error, a page cap, or a pin file is never
+skipped — those PRs always get pipelines. A pre-filter failure is
+the `prefilter-error` marker, never a stop.
+
 ## Phase 1b — Clone the sources (a script, run beside Phase 1)
 
 The run's code questions are answered from real code, never from the `candidates` column of
@@ -204,9 +214,15 @@ coverage (present, non-empty) only. The sweep's outcomes set the run's verificat
 
 ## Phase 2 — Dispatch: one pipeline per PR, start to finish
 
-Zero merges: skip to Phase 3. Otherwise shard `rows.jsonl` into ONE item
-per PR — never a batch of several, because a batch child is a barrier
-its siblings wait on. Order items newest-first so any pool-limit
+Zero merges: skip to Phase 3. Otherwise shard by the Phase 1
+PRE-FILTER: ONE pipeline item per PR whose `prefilter.jsonl` row has
+`intersect: true` (watch-path hit, pin file, file-list error, or page
+cap) — never a batch of several, because a batch child is a barrier
+its siblings wait on. A row with `intersect: false`, no error, and no
+truncation is a scripted `irrelevant`: record it in ONE bash pass —
+a ledger row and a rollup section citing the file count and the
+prefilter row, no verdict file, no children, no GitHub write — never
+a pipeline. Order pipeline items newest-first so any pool-limit
 truncation remains newest-first. Each item carries everything its child
 needs and nothing it does not: `<owner/repo>#<number>|<title>|<merged-at>|<watch-paths csv>|<clone-status>`
 (titles stripped of `|` and `;`; watch-paths from `config/repo-list.txt`,
