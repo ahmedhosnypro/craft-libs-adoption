@@ -41,6 +41,20 @@ if [ -n "${GITHUB_PATH:-}" ]; then
   echo "$bindir" >> "$GITHUB_PATH"
 fi
 
+# Pre-flight: every agent profile must load in the engine before a run
+# spends hours on it. A rejected profile fails the job here, in seconds.
+shopt -s nullglob
+for profile in "${GITHUB_WORKSPACE}"/.craft-agent/agents/*.md; do
+  name="$(basename "$profile" .md)"
+  out="$(echo hi | CRAFT_AGENT_PROVIDER=anthropic ANTHROPIC_API_KEY=dummy \
+    CRAFT_AGENT_MODEL=dummy craft-agent run --agent "$name" \
+    --prompt /dev/stdin --output-format plain 2>&1 || true)"
+  if printf '%s' "$out" | grep -qE 'skipped agent file|agent file is invalid|MD0[0-9]|unknown agent profile|available: \(none found\)'; then
+    echo "::error::agent profile '$name' failed engine validation: $(printf '%s' "$out" | grep -E 'MD0[0-9]|invalid|unknown agent profile|none found' | head -n 1)"
+    exit 1
+  fi
+done
+
 git config --global --add safe.directory "$GITHUB_WORKSPACE"
 git config --global user.name "craft-agent"
 git config --global user.email "agent@craft-agent.invalid"
