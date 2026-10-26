@@ -7,7 +7,7 @@ limits:
   max-steps: "8"
   max-total-turns: "10000"
   max-total-tokens: "1000000000"
-  max-retries-per-step: "2"
+  max-retries-per-step: "4"
   max-concurrent-steps: "4"
 steps:
   - id: prepare
@@ -114,6 +114,17 @@ steps:
         pool QUEUES these calls — a typed refusal is a call-shape bug
         to fix on the next turn, never a reason to do a pipeline's
         work yourself.
+      - DISPATCH IS THE STEP'S SUCCESS CRITERION — never end this
+        step, and never finish with a plan, while any accepted PR item
+        still lacks a named pipeline id in your ledger. A final
+        message of intentions ("let me regenerate the items...") is a
+        failure, not a handoff: the spawn calls go out FIRST in the
+        turn the items are ready, and the final message is composed
+        only once every item is dispatched and its id recorded. If
+        item refinement keeps failing, spawn straight from the
+        pre-filter rows rather than ending without children.
+        rollup-seal composes whatever settled, so a pipeline never
+        dispatched is a PR silently lost.
       - THE POLL LAW — poll ONLY by explicit ids. The hub is shared
         with every pipeline's stage children, so a bulk drain collects
         your pipelines' siblings' envelopes and steals them. Record
@@ -170,7 +181,11 @@ steps:
         files (run-ledger/outcomes/*.md) for at most 45 minutes until
         the file and bump branches reach terminal state — settled,
         failed, or skipped-with-reason. Anything still non-terminal at
-        the deadline becomes an exception row, never a claim.
+        the deadline becomes an exception row, never a claim. If the
+        journal's pr-pipeline step record names NO accepted pipeline
+        children, treat that as a step failure this step reports as an
+        exception — do not compose an empty-window rollup over a
+        window that had PRs; the exception names the journal record.
       - Build the snapshot with bash, in ONE pass — counting and
         concatenation, never per-file reading: every rollup section,
         prepare's clone outcomes and verdict digest, the outcome rows
