@@ -120,7 +120,8 @@ pipeline spawns its own stage children, and the one stage that fans out further 
 spawns one `dup-verifier` child per claimed consumer in a single detached batch, proving every
 app's duplication in parallel while it works the scope read and the licensing gate itself.
 `dup-verifier` spawns nothing. Every spawn carries `maxTurns: 10000`
-and a finite `timeoutSecs` (1800, or 3600 for a classifier child) and omits `maxTokens`: subagent
+and a finite `timeoutSecs` (1800 for a stage child, 3600 for a classifier child, 7200 for the
+pipeline child itself) and omits `maxTokens`: subagent
 token budgets are unlimited and reserve nothing, so a group's admission never depends on a
 slice-times-count reservation.
 

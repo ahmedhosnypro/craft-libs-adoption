@@ -82,10 +82,12 @@ steps:
         file list failed or page-capped. ONE pipeline item per such
         PR — never a batch of several, because a batch child is a
         barrier its siblings wait on. Item shape:
-        `<owner/repo>#<number>|<title>|<merged-at>|<watch-paths csv>|<clone-status>`,
+        `<owner/repo>#<number>|<title>|<merged-at>|<watch-paths csv>|<clone-status>|<matched files csv>`,
         titles stripped of `|` and `;`, watch-paths from
         `config/repo-list.txt`, clone-status from prepare's outcome
-        lines (`ok` / `ok-degraded` / `blocked`). Order items
+        lines (`ok` / `ok-degraded` / `blocked`), matched files from
+        the pre-filter row (≤10; an empty csv means the classifier
+        fetches the list itself). Order items
         newest-first, so any dispatch that cannot start at once runs
         newest-first too.
       - RECORD THE SCRIPTED-IRRELEVANT PRS — prefilter rows with
@@ -103,7 +105,7 @@ steps:
         verdict-file path, its ledger path, its rollup-section path,
         its repo's watch-paths and clone-status, the scope-truth clone
         path, and the read-only-gh law>", "items": ["<one PR per
-        item>", ...], "maxTurns": 10000, "timeoutSecs": 3600,
+        item>", ...], "maxTurns": 10000, "timeoutSecs": 7200,
         "detached": true}` — one call per group of 2..=32 items, every
         group in the same turn, because each returns at admission. Use
         `spawn_agent` (also `detached: true`) for a single-PR group;
@@ -390,7 +392,10 @@ delete.
   child wrote.
 - THE WALL-CLOCK LAW (never `timeoutSecs: 0`): every spawn call carries a
   finite `timeoutSecs` — 1800 for a filer, applier, or committer child,
-  3600 for a classifier wave and its grandchildren. Token budgets stay
+  3600 for a classifier child and its grandchildren, 7200 for a
+  pr-pipeline child itself (a pipeline's real life is longer than an
+  hour, and a wall-clock death makes the parent re-pay the child's
+  whole spend). Token budgets stay
   UNLIMITED (omitted `maxTokens`). A child without a wall clock can hang
   the tool call that awaits it. The clock reclaiming a child is a named
   exception, never a lost run.

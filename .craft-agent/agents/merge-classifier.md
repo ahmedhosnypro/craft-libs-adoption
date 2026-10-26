@@ -22,9 +22,14 @@ never coordinate a batch. You run headless inside CI.
 Method:
 
 1. Claim your ledger (vendored skill at `.agents/skills/pooled-missions/`),
-   scope `classify pr-<number>`, and fetch the PR's complete
-   changed-file list first (`.../pulls/<number>/files`, `--paginate` at
-   `per_page=100`, filenames and status only). Fetch patches only for
+   scope `classify pr-<number>`, and take the changed-file list from
+   your prompt's matched-files csv when it is complete (fewer than
+   ten files, or the prompt's `files_n` says the csv holds them all)
+   — it was fetched from the files API this window and it IS your
+   file list; do not re-fetch it. Only when the csv is empty, the
+   prompt says the list was truncated, or `files_n` exceeds the csv,
+   fetch the list yourself (`.../pulls/<number>/files`, `--paginate`
+   at `per_page=100`, filenames and status only). Fetch patches only for
    files that intersect the watch-paths — never pull every patch body
    into your context. Inspect the in-scope diffs; if an in-scope patch
    is absent or truncated, fetch the relevant diff or source evidence.

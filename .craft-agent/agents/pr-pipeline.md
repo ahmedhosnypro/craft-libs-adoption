@@ -86,7 +86,9 @@ discovery you could have made while its child was already running.
 1. CLASSIFY — spawn one `merge-classifier` child
    (`spawn_agent`, `detached: true`, `timeoutSecs: 3600`) whose prompt
    carries: the PR item (`<owner/repo>#<number>|<title>|<merged-at>|
-   <watch-paths csv>|<clone-status>`), the classification rules
+   <watch-paths csv>|<clone-status>|<matched files csv>`, matched
+   files from the pre-filter row, empty when the list was truncated
+   or failed), the classification rules
    (watch-path intersection, rev-sync/hoist/port/irrelevant/
    unverified/maturing classes, the packaging rule), the verdict-file
    contract at the path in your prompt (`run-ledger/classifier/

@@ -224,17 +224,23 @@ a ledger row and a rollup section citing the file count and the
 prefilter row, no verdict file, no children, no GitHub write — never
 a pipeline. Order pipeline items newest-first so any pool-limit
 truncation remains newest-first. Each item carries everything its child
-needs and nothing it does not: `<owner/repo>#<number>|<title>|<merged-at>|<watch-paths csv>|<clone-status>`
+needs and nothing it does not: `<owner/repo>#<number>|<title>|<merged-at>|<watch-paths csv>|<clone-status>|<matched files csv>`
 (titles stripped of `|` and `;`; watch-paths from `config/repo-list.txt`,
-clone-status from the Phase 1b outcome lines).
+clone-status from the Phase 1b outcome lines; matched files from the
+prefilter row, empty when truncated or failed). The pipeline child's
+wall clock is 7200s — its real life is longer than an hour, and a
+wall-clock death makes the orchestrator re-pay the child's whole
+spend.
 
 Dispatch ONE `pr-pipeline` child per PR, DETACHED, every group's call in
 ONE turn — one `spawn_agents` call per group of 2–32 items, or the
 detached `spawn_agent` for a single item, each carrying `"detached":
-true`, `maxTurns: 10000`, `timeoutSecs: 3600`, and no `maxTokens`. Both
+true`, `maxTurns: 10000`, `timeoutSecs: 7200`, and no `maxTokens`. Both
 tools return at admission and name their accepted ids, so a group costs
 nothing to queue and the pool runs the members under the concurrency
-knob. A saturated pool QUEUES a detached spawn instead of refusing it,
+knob — a pipeline's real life is longer than an hour, and a wall-clock
+death makes the orchestrator re-pay the child's whole spend. A
+saturated pool QUEUES a detached spawn instead of refusing it,
 and a dispatch from a running pipeline launches ahead of fresh
 dispatches not yet started — so a PR's next stage never waits behind
 a pipeline that has not begun.
