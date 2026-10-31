@@ -70,7 +70,7 @@ Your discipline, in order of importance:
   `pr-pipeline` children:
   `{"agent": "pr-pipeline", "promptTemplate": "<the per-PR contract
   with {{item}}>", "items": ["<one PR per item>", ...],
-  "maxTurns": 10000, "timeoutSecs": 3600, "detached": true}` — one call
+  "maxTurns": 10000, "timeoutSecs": 7200, "detached": true}` — one call
   per group of 2–32 items, every group's call in ONE turn (each returns
   at admission, so they cost nothing to queue). Item shape:
   `<owner/repo>#<number>|<title>|<merged-at>|<watch-paths csv>|<clone-status>`.

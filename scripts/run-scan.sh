@@ -155,6 +155,28 @@ esac
 if [ "$mode" = "workflow" ] && [ -z "$report" ]; then
   conclusion="error"
 fi
+
+# Truth-in-conclusion: a green run whose stream shows children dropped
+# before completion AND no landed-write marker is hollow — label it
+# distinctly instead of an unlabeled success. The exit code never
+# changes: this cannot turn a green scan red.
+if [ "$conclusion" = "success" ]; then
+  search_paths=("$stream")
+  sessions_root="${GITHUB_WORKSPACE}/.craft-agent"
+  if [ -n "$journal_dir" ]; then
+    sessions_root="$journal_dir"
+  fi
+  while IFS= read -r -d '' f; do
+    search_paths+=("$f")
+  done < <(find "$sessions_root" -name '*.jsonl' -print0 2>/dev/null)
+  spawn_errors="$(grep -h -o '"stop_reason":"spawn_error"' "${search_paths[@]}" 2>/dev/null | wc -l)"
+  landed_writes="$(grep -h -oE 'created (issue|comment) #[0-9]+|updated the body|opened pull request #[0-9]+|pushed [0-9a-f]{7,}|push succeeded' "${search_paths[@]}" 2>/dev/null | wc -l)"
+  threshold="${NO_MOVEMENT_SPAWN_ERROR_THRESHOLD:-0}"
+  if [ "$spawn_errors" -gt "$threshold" ] && [ "$landed_writes" -eq 0 ]; then
+    conclusion="no-movement"
+    echo "note: ${spawn_errors} spawn_error children, zero landed writes — conclusion relabeled no-movement (exit code unchanged)"
+  fi
+fi
 : "${final_message:=workflow produced no report}"
 : "${final_message:=}"
 {

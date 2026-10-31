@@ -14,7 +14,7 @@ set -uo pipefail
 SINCE="${1:?since ISO-8601 timestamp required}"
 OUT="${2:-run-ledger/prepare}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SCRIPT_DIR="$ROOT/scripts"
+export SCRIPT_DIR="$ROOT/scripts"
 
 mkdir -p "$OUT/logs"
 

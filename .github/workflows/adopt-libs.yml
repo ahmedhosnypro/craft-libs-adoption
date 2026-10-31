@@ -12,9 +12,9 @@ on:
         required: false
         default: github-actions
       workflow:
-        description: "Which run: the judged adopt-libs workflow, or the mission (today's default)"
+        description: "Which run: the judged adopt-libs workflow (the default), or the mission (the rollback path)"
         required: false
-        default: mission
+        default: adopt-libs
         type: choice
         options:
           - mission
@@ -275,7 +275,8 @@ jobs:
       - name: Keep the schedule alive (60-day activity pulse)
         if: always()
         env:
-          GH_TOKEN: ${{ github.token }}
+          # The builtin token cannot push cross-repo; the PAT can.
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_ACCESS_TOKEN }}
         run: |
           set -euo pipefail
           # Best-effort by design: this push only resets the 60-day

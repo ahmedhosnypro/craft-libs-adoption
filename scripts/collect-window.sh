@@ -73,7 +73,8 @@ done
 # A mismatch is an exception the window comment names.
 help="$OUT/prs.json"
 if command -v craft-helpers >/dev/null 2>&1; then
-  craft-helpers prs --org storytold --repos "$(repos | paste -sd, -)" \
+  # --repos takes bare names under --org; strip the owner prefix.
+  craft-helpers prs --org storytold --repos "$(repos | sed 's|^[^/]*/||' | paste -sd, -)" \
     --since "$WINDOW" --limit-per-repo 100 --json > "$help" 2>/dev/null \
     || markers+=("helper-unavailable")
 else
