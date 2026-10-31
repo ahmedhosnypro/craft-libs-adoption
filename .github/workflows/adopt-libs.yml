@@ -235,7 +235,7 @@ jobs:
           # Mission-only knobs below — read by run-scan.sh in mission mode
           # alone, so they may be left in place in workflow mode.
           CRAFT_AGENT_ARGS: --agent lib-adoption-analyst
-          CRAFT_AGENT_MAX_TURNS: "250"
+          CRAFT_AGENT_MAX_TURNS: "1000"
           CRAFT_AGENT_MAX_TOKENS: "5000000000"
           # The dispatch dropdown selects the judged workflow; scheduled
           # runs always take it, and anything else keeps the mission.
