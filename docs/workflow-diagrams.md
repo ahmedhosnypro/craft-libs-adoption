@@ -266,7 +266,9 @@ Workflow mode lives in `.craft-agent/workflows/adopt-libs.md` (frontmatter `name
 orchestrator, and every GitHub write sits behind a verdict. Limits: `max-steps: "8"` (headroom over
 the 6 steps), `max-concurrent-steps: "4"`, `max-total-turns: "10000"`, `max-total-tokens: "1000000000"`,
 `max-retries-per-step: "2"`. Every step states `max-turns`, `retry`, and `on-failure` explicitly —
-never relying on the 25/0/stop defaults. The judge seats are budget-bound, not advised: the gate
+never relying on the 25/0/stop defaults. The fan-out step `pr-pipeline` states `retry: "0"`, so a
+failed dispatch is never re-dispatched into an exhausted quota; every other step keeps its single
+bounded retry, and the engine-level `CRAFT_AGENT_STEP_RETRIES: "2"` caps the rest. The judge seats are budget-bound, not advised: the gate
 bodies write a call plan (call 1 one composed bash pass, 2-4 the live reads) and the step caps bind
 it — `max-turns: "90"` on the panel gates, `"60"` on the appeals — so a seat that walks the ledger
 file-by-file fails instead of spending the window.
@@ -335,7 +337,10 @@ file-list error, or a page cap become ONE pipeline item each; rows with no inter
 are scripted `irrelevant`, recorded as ledger rows and rollup sections in one bash pass with no
 children. It dispatches the intersecting PRs as detached `pr-pipeline` children: every group's
 `spawn_agents` call carries `"detached": true`, so it returns at admission and the pool runs the
-members under the concurrency knob. Each child then runs its PR's ENTIRE life inside itself,
+members under the concurrency knob. Admission is wave-staged: a new group of 2..=32 items goes
+out only while fewer than 48 of the dispatched pipelines are non-terminal, and the next groups
+follow as earlier pipelines settle — a sliding window, not one turn and not full serialization,
+so a window larger than one group still finishes inside the job's 360-minute wall. Each child then runs its PR's ENTIRE life inside itself,
 spawning its own stage children detached and polling only its own ids. A PR may finish its whole
 life — classification, filed issue, rollup section — while another PR is still in its first stage.
 
@@ -353,7 +358,7 @@ sequenceDiagram
     participant B as PR #900 pipeline (hoist)
     participant C as PR #1200 pipeline (irrelevant)
 
-    O->>Pool: spawn_agents pr-pipeline detached, groups of 2..32, one turn
+    O->>Pool: spawn_agents pr-pipeline detached, groups of 2..32, staged while <48 non-terminal
     Pool-->>O: accepted ids (immediate — no await)
     O->>O: poll_agents by explicit ids, waitSecs 120
     A->>Pool: spawn_agent merge-classifier for #41 (detached, continuation)

@@ -10,7 +10,7 @@ description: >-
   mission-state snapshot, and delivering the run.
 promptMode: full
 tools: bash, read_file, write_file, edit_file, glob, grep, gh, spawn_agent, spawn_agents, poll_agents
-maxTurns: 250
+maxTurns: 1000
 timeoutSecs: 30000
 ---
 You are lib-adoption-analyst, orchestrator of the craft-libs adoption
