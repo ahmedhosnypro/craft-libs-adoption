@@ -7,7 +7,7 @@ limits:
   max-steps: "8"
   max-total-turns: "10000"
   max-total-tokens: "1000000000"
-  max-retries-per-step: "4"
+  max-retries-per-step: "2"
   max-concurrent-steps: "4"
 steps:
   - id: prepare
@@ -65,7 +65,7 @@ steps:
     agent: lib-adoption-analyst
     needs: [prepare]
     max-turns: "1200"
-    retry: "1"
+    retry: "0"
     on-failure: stop
     outputs: [pipeline-rows, filed-issues, opened-prs, deferred, pipeline-exceptions]
     body: |
@@ -99,21 +99,27 @@ steps:
         no pin file (prefilter row cited)` — and nothing else. No
         verdict file, no children, no lease, no gate, no GitHub
         write: a scripted row makes no artifact, so it needs none.
-      - DISPATCH — one `pr-pipeline` child per PR, DETACHED, every
-        group's call in ONE turn: `{"agent": "pr-pipeline",
+      - DISPATCH — one `pr-pipeline` child per PR, DETACHED, admitted
+        in wave-staged groups: `{"agent": "pr-pipeline",
         "promptTemplate": "<the per-PR contract carrying {{item}}, its
         verdict-file path, its ledger path, its rollup-section path,
         its repo's watch-paths and clone-status, the scope-truth clone
         path, and the read-only-gh law>", "items": ["<one PR per
         item>", ...], "maxTurns": 10000, "timeoutSecs": 7200,
-        "detached": true}` — one call per group of 2..=32 items, every
-        group in the same turn, because each returns at admission. Use
-        `spawn_agent` (also `detached: true`) for a single-PR group;
-        NEVER a one-item `spawn_agents` call. Omit `maxTokens`. The
-        promptTemplate MUST carry the literal `{{item}}`. A saturated
-        pool QUEUES these calls — a typed refusal is a call-shape bug
-        to fix on the next turn, never a reason to do a pipeline's
-        work yourself.
+        "detached": true}` — one call per group of 2..=32 items, each
+        call returning at admission. Admission is a SLIDING window, not
+        one turn and not full serialization: send a new group only
+        while fewer than 48 of your dispatched pr-pipeline children are
+        non-terminal (48 is the pool's CRAFT_AGENT_SUBAGENT_MAX_CONCURRENCY
+        cap), and send the next group(s) as earlier pipelines reach
+        terminal states — poll your accepted ids (THE POLL LAW) to count
+        the non-terminal ones. A window larger than one group still
+        streams through inside the job's wall clock. Use `spawn_agent`
+        (also `detached: true`) for a single-PR group; NEVER a one-item
+        `spawn_agents` call. Omit `maxTokens`. The promptTemplate MUST
+        carry the literal `{{item}}`. A saturated pool QUEUES these
+        calls — a typed refusal is a call-shape bug to fix on the next
+        turn, never a reason to do a pipeline's work yourself.
       - DISPATCH IS THE STEP'S SUCCESS CRITERION — never end this
         step, and never finish with a plan, while any accepted PR item
         still lacks a named pipeline id in your ledger. A final

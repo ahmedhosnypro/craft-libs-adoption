@@ -235,14 +235,14 @@ jobs:
           # Mission-only knobs below — read by run-scan.sh in mission mode
           # alone, so they may be left in place in workflow mode.
           CRAFT_AGENT_ARGS: --agent lib-adoption-analyst
-          CRAFT_AGENT_MAX_TURNS: "250"
+          CRAFT_AGENT_MAX_TURNS: "1000"
           CRAFT_AGENT_MAX_TOKENS: "5000000000"
           # The dispatch dropdown selects the judged workflow; scheduled
           # runs always take it, and anything else keeps the mission.
           # run-scan.sh switches on this.
           CRAFT_AGENT_WORKFLOW: ${{ (github.event.inputs.workflow == 'adopt-libs' || github.event_name == 'schedule') && 'adopt-libs' || '' }}
           # Ride out transient gateway drops mid-run.
-          CRAFT_AGENT_STEP_RETRIES: "6"
+          CRAFT_AGENT_STEP_RETRIES: "2"
           # Transient failures keep retrying for this long, past the
           # attempt bound, before a step gives up.
           CRAFT_AGENT_RETRY_PATIENCE_SECS: "1800"
