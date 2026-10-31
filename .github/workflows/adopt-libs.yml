@@ -242,7 +242,7 @@ jobs:
           # run-scan.sh switches on this.
           CRAFT_AGENT_WORKFLOW: ${{ (github.event.inputs.workflow == 'adopt-libs' || github.event_name == 'schedule') && 'adopt-libs' || '' }}
           # Ride out transient gateway drops mid-run.
-          CRAFT_AGENT_STEP_RETRIES: "6"
+          CRAFT_AGENT_STEP_RETRIES: "2"
           # Transient failures keep retrying for this long, past the
           # attempt bound, before a step gives up.
           CRAFT_AGENT_RETRY_PATIENCE_SECS: "1800"

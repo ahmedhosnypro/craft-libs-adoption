@@ -7,7 +7,7 @@ limits:
   max-steps: "8"
   max-total-turns: "10000"
   max-total-tokens: "1000000000"
-  max-retries-per-step: "4"
+  max-retries-per-step: "2"
   max-concurrent-steps: "4"
 steps:
   - id: prepare
@@ -65,7 +65,7 @@ steps:
     agent: lib-adoption-analyst
     needs: [prepare]
     max-turns: "1200"
-    retry: "1"
+    retry: "0"
     on-failure: stop
     outputs: [pipeline-rows, filed-issues, opened-prs, deferred, pipeline-exceptions]
     body: |
