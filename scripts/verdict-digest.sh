@@ -63,24 +63,35 @@ if [ -s "${closed_json:-/dev/null}" ]; then
     slug="$(printf '%s' "$title" | sed -e 's/^adoption-scan:[[:space:]]*//')"
 
     # The latest comment created before closeAt carrying a Verdict or
-    # Resolution heading; no author check.
-    verdict="$(
+    # Resolution heading (inline included); no author check. The
+    # conditions column pulls the verdict's own condition/reopen lines.
+    mapfile -t vc < <(
       gh api "repos/$REPO/issues/$number/comments" --paginate 2>/dev/null \
         | jq -r --arg before "$closed_at" '
-            [ .[]
+            ([ .[]
               | select((.created_at // "") <= $before)
-              | select((.body // "") | test("(?i)^#{0,3}[[:space:]]*(verdict|resolution)"))
-            ] | last | .body // ""
-          ' 2>/dev/null | head -c 2000
-    )"
+              | select((.body // "") | test("(?i)(verdict|resolution)"))
+            ] | last | .body // "") as $v
+            | ($v | if . == "" then ""
+                   else (split("\n") | join(" ") | gsub(" +"; " ") | gsub("\\|"; "\\\\|") | .[0:2000]) end),
+              ([ $v | split("\n")[]
+                 | select(test("(?i)(unmet|condition|reopen|revival)"))
+                 | gsub("^[-*[:space:]]+"; "") ]
+               | join(" ") | gsub("\\|"; "\\\\|") | .[0:200])
+          ' 2>/dev/null
+    )
+    verdict="${vc[0]:-}"
+    conditions="${vc[1]:-}"
 
     if [ -z "$verdict" ]; then
       verdict_line="closed without recorded verdict"
+      conditions="-"
     else
-      verdict_line="$(printf '%s' "$verdict" | tr '\n' ' ' | tr -s ' ' | head -c 400)"
+      verdict_line="$verdict"
     fi
+    [ -n "$conditions" ] || conditions="none recorded"
 
-    printf '| %s | %s | %s | |\n' "$number" "$slug" "$verdict_line" >> "$digest"
+    printf '| %s | %s | %s | %s |\n' "$number" "$slug" "$verdict_line" "$conditions" >> "$digest"
     i=$((i + 1))
   done
 else

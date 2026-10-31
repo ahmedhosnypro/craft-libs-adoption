@@ -35,23 +35,25 @@ items() {
 # One repo's ladder: sparse, then full, then tarball. Appends exactly
 # one outcome line, whatever the outcome is.
 clone_one() {
-  local repo="$1" paths="$2" slug method sha files
+  local repo="$1" paths="$2" slug method sha files err reasons=""
   slug="${repo##*/}"
   if [ "$repo" = "$SCOPE_TRUTH" ]; then slug="craft-libs"; fi
   local dest="$SOURCES/$slug"
 
   for method in sparse full tarball; do
     rm -rf "$dest"
+    err="$(mktemp)"
     if [ "$method" = sparse ]; then
       # shellcheck disable=SC2046
       bash "$SCRIPT_DIR/clone-sources.sh" sparse "$repo" "$dest" \
-        $(printf '%s' "$paths" | tr ',' ' ') >/dev/null 2>&1
+        $(printf '%s' "$paths" | tr ',' ' ') >/dev/null 2>"$err"
     elif [ "$method" = full ]; then
-      bash "$SCRIPT_DIR/clone-sources.sh" full "$repo" "$dest" >/dev/null 2>&1
+      bash "$SCRIPT_DIR/clone-sources.sh" full "$repo" "$dest" >/dev/null 2>"$err"
     else
-      bash "$SCRIPT_DIR/clone-sources.sh" tarball "$repo" "$dest" >/dev/null 2>&1
+      bash "$SCRIPT_DIR/clone-sources.sh" tarball "$repo" "$dest" >/dev/null 2>"$err"
     fi
     if [ "$?" -eq 0 ]; then
+      rm -f "$err"
       files="$(find "$dest" -type f 2>/dev/null | wc -l)"
       sha="$(git -C "$dest" rev-parse --short HEAD 2>/dev/null || true)"
       if [ -z "$sha" ]; then
@@ -62,10 +64,13 @@ clone_one() {
       fi
       return 0
     fi
+    reasons="${reasons:+$reasons; }$method: $(tr '\n' ' ' < "$err" | tr -s ' ' | head -c 160)"
+    rm -f "$err"
   done
 
   rm -rf "$dest"
-  printf '%s\tblocked\tall-methods-failed\t-\t0\n' "$repo" >> "$outcomes"
+  printf '%s\tblocked\tall-methods-failed\t-\t0\t%s\n' \
+    "$repo" "${reasons:-no reason captured}" >> "$outcomes"
   return 0
 }
 
