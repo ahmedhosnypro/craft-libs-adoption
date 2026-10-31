@@ -23,6 +23,16 @@ source repo (`ahmedhosnypro/ironrouter-backend`) by itself, restored into Postgr
 the gateway binary serves on :17844 before `scripts/run-scan.sh` starts the agent. The pulse step is
 best-effort: it never turns a green scan red.
 
+Four more dispatch inputs tune the craft-agent engine knobs for the whole run —
+`max_context_tokens` (default `262000`), `max_input_tokens` (default `230000`),
+`max_output_tokens` (default `32000`), and `thinking_level` (default `high`, free text) — and the
+scan job exports them as the `CRAFT_AGENT_MAX_CONTEXT_TOKENS`, `CRAFT_AGENT_MAX_INPUT_TOKENS`,
+`CRAFT_AGENT_MAX_OUTPUT_TOKENS`, and `CRAFT_AGENT_THINKING_LEVEL` env vars (env only, never CLI
+flags). That env tier is global: per-agent frontmatter keys (`maxContextTokens`, `maxInputTokens`,
+`maxOutputTokens`, `thinking`) override it, and explicit CLI flags
+(`--max-context-tokens`, `--max-input-tokens`, `--max-output-tokens`, `--thinking-level`) beat all.
+Max context enables auto-compaction in the engine. Scheduled cron runs get the defaults.
+
 Mission mode (the rollback path): the `Load the mission prompt` step reads
 `missions/adopt-libs.md`, and `scripts/run-scan.sh` runs `craft-agent run --agent
 lib-adoption-analyst --prompt <mission file>`. Workflow mode swaps that for `craft-agent workflow
@@ -39,7 +49,7 @@ racy surfaces those parallel runs share.
 
 ```mermaid
 flowchart TD
-    Trigger["cron 20 0,6,12,18 * * *<br/>or workflow_dispatch"] --> Checkout["Check out the repository"]
+    Trigger["cron 20 0,6,12,18 * * *<br/>or workflow_dispatch<br/>inputs: workflow, model, gateway-tag,<br/>max_context_tokens, max_input_tokens,<br/>max_output_tokens, thinking_level"] --> Checkout["Check out the repository"]
     Checkout --> FetchGW["Download the model gateway release<br/>ahmedhosnypro/IronRouter, checksums verified"]
     FetchGW --> FetchDump["Fetch the registry dump<br/>ironrouter-backend/ironrouter-registry.dump via contents API"]
     FetchDump --> Postgres["Start the gateway database<br/>postgres:17 on :5434"]
