@@ -1,7 +1,7 @@
 <!--
   Phase-contract library for `.craft-agent/workflows/adopt-libs.md`: each of its 16 step bodies
-  cites and compresses the phase contracts below. Also the mission-mode run prompt — the CI
-  default today and the rollback path if the judged workflow is ever reverted.
+  cites and compresses the phase contracts below. Also the mission-mode run prompt — the
+  rollback path, selected by a dispatch with the `workflow` input set to `mission`.
 -->
 # Mission: the six-hour craft-libs adoption scan
 
@@ -98,7 +98,7 @@ from children doing serial work:
   (CRAFT_AGENT_SUBAGENT_MAX_CONCURRENCY), not a ceiling to chase. Batch: 2-32 items per spawn_agents
   call, prompts ≤ 64 KiB each.
 
-- Total: at most 4096 subagents per run (CRAFT_AGENT_SUBAGENT_MAX_TOTAL) — the window's pipelines
+- Total: at most 1024 subagents per run (CRAFT_AGENT_SUBAGENT_MAX_TOTAL) — the window's pipelines
   plus their stage children plus retries. Depth: at most 3 (CRAFT_AGENT_SUBAGENT_MAX_DEPTH) — the
   orchestrator, its pr-pipeline children, each pipeline's stage children, and the one fan-out: a
   filer's `dup-verifier` children (one batch turn, one per claimed consumer); a `dup-verifier`

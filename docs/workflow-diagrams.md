@@ -5,13 +5,14 @@ How the six-hour craft-libs adoption scan actually runs: the GitHub Actions job 
 subagent pool of `.craft-agent/agents/`. Every name below is a real file, step, phase, agent, or
 artifact. One diagram per concept; nothing here invents entities.
 
-Two modes are drawn here. **Mission mode** (sections 1–9) is today's CI default and the rollback
-path: `lib-adoption-analyst` drives the phases itself and the specialists write to GitHub directly.
-**Workflow mode** (sections 10–12) is the judged DAG in `.craft-agent/workflows/adopt-libs.md` —
-6 steps where each PR's whole life, including its own gate and appeal, runs on its own detached
-pipeline, and only the seal's write gathers the run again. Mission mode is the
-current reality; workflow mode is what the same run becomes, so where the two conflict the
-mission-mode sections describe the rollback path, not the destination.
+Two modes are drawn here. **Workflow mode** (sections 10–12) is the default — scheduled cron runs
+and workflow dispatches alike (the `workflow` input defaults to `adopt-libs`): the judged DAG in
+`.craft-agent/workflows/adopt-libs.md`, 6 steps where each PR's whole life, including its own gate
+and appeal, runs on its own detached pipeline, and only the seal's write gathers the run again.
+**Mission mode** (sections 1–9) is the rollback path, selected by a dispatch with the `workflow`
+input set to `mission`: `lib-adoption-analyst` drives the phases itself and the specialists write
+to GitHub directly. Where the two conflict, the mission-mode sections describe the rollback path,
+not the default.
 
 ## 1. The CI job — boot the gateway, run the scan
 
@@ -28,9 +29,9 @@ lib-adoption-analyst --prompt <mission file>`. Workflow mode swaps that for `cra
 --workflow adopt-libs` (no `--max-tokens` — it is a per-step cap), with the renderer following the
 run's journal (step events) and the per-step session transcripts (prompts, tool calls, tool results)
 under `.craft-agent/workflows/<run_id>/` for mid-step liveness; `run-scan.sh` selects it from
-`CRAFT_AGENT_WORKFLOW`, which the `workflow` dispatch dropdown sets (`mission` or `adopt-libs`);
-scheduled cron runs always take the workflow, a dispatch with the input left at `mission` keeps the
-mission — see section 10. Concurrency is event-scoped:
+`CRAFT_AGENT_WORKFLOW`, which the `workflow` dispatch dropdown sets (`adopt-libs` by default,
+`mission` for the rollback path); scheduled cron runs always take the workflow, a dispatch with
+the input set to `mission` keeps the mission — see section 10. Concurrency is event-scoped:
 scheduled runs serialize on one group (`adopt-libs-scheduled`), and every manual dispatch joins its own
 group (`adopt-libs-${{ github.run_id }}`), so a mission scan and a workflow rehearsal can run at the
 same time — the tracking-issue state update and the `already-filed`/`already-open` checks are the
