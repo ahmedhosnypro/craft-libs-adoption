@@ -12,9 +12,9 @@ on:
         required: false
         default: github-actions
       workflow:
-        description: "Which run: the judged adopt-libs workflow, or the mission (today's default)"
+        description: "Which run: the judged adopt-libs workflow (the default), or the mission (the rollback path)"
         required: false
-        default: mission
+        default: adopt-libs
         type: choice
         options:
           - mission
