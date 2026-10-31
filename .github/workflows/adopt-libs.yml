@@ -19,6 +19,26 @@ on:
         options:
           - mission
           - adopt-libs
+      max_context_tokens:
+        description: "Global context-window cap for the craft-agent engine (CRAFT_AGENT_MAX_CONTEXT_TOKENS); enables auto-compaction. Per-agent frontmatter maxContextTokens overrides; CLI --max-context-tokens beats all"
+        required: false
+        default: "262000"
+        type: string
+      max_input_tokens:
+        description: "Global input-token cap per model call (CRAFT_AGENT_MAX_INPUT_TOKENS). Per-agent frontmatter maxInputTokens overrides; CLI --max-input-tokens beats all"
+        required: false
+        default: "230000"
+        type: string
+      max_output_tokens:
+        description: "Global output-token cap per model call (CRAFT_AGENT_MAX_OUTPUT_TOKENS). Per-agent frontmatter maxOutputTokens overrides; CLI --max-output-tokens beats all"
+        required: false
+        default: "32000"
+        type: string
+      thinking_level:
+        description: "Thinking/reasoning effort level passed to the engine (CRAFT_AGENT_THINKING_LEVEL). Common values: none, low, medium, high, xhigh, max — any provider value is accepted. Per-agent frontmatter thinking overrides; CLI --thinking-level beats all"
+        required: false
+        default: "high"
+        type: string
       gateway-tag:
         description: "IronRouter release tag to run the gateway from (empty = latest published release)"
         required: false
@@ -237,6 +257,15 @@ jobs:
           CRAFT_AGENT_ARGS: --agent lib-adoption-analyst
           CRAFT_AGENT_MAX_TURNS: "1000"
           CRAFT_AGENT_MAX_TOKENS: "5000000000"
+          # Engine knobs (global tier, env only — never CLI flags): the
+          # dispatch inputs set them, scheduled runs fall back to the
+          # defaults below. Per-agent frontmatter (maxContextTokens /
+          # maxInputTokens / maxOutputTokens / thinking) overrides these;
+          # explicit CLI flags beat all. Max context enables auto-compaction.
+          CRAFT_AGENT_MAX_CONTEXT_TOKENS: ${{ github.event.inputs.max_context_tokens || '262000' }}
+          CRAFT_AGENT_MAX_INPUT_TOKENS: ${{ github.event.inputs.max_input_tokens || '230000' }}
+          CRAFT_AGENT_MAX_OUTPUT_TOKENS: ${{ github.event.inputs.max_output_tokens || '32000' }}
+          CRAFT_AGENT_THINKING_LEVEL: ${{ github.event.inputs.thinking_level || 'high' }}
           # The dispatch dropdown selects the judged workflow; scheduled
           # runs always take it, and anything else keeps the mission.
           # run-scan.sh switches on this.
