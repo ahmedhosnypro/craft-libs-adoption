@@ -6,7 +6,7 @@
 # scan, and renders the stream into the log turn by turn.
 set -euo pipefail
 
-VERSION="${CRAFT_AGENT_VERSION:-v0.0.16}"
+VERSION="${CRAFT_AGENT_VERSION:-v0.0.17}"
 REPO="${CRAFT_AGENT_RELEASE_REPOSITORY:-ahmedhosnypro/craft-agent}"
 
 case "${RUNNER_OS}:${RUNNER_ARCH}" in
